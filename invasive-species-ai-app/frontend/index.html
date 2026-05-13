@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<title>Espécies Invasoras — Protótipo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link
+rel="stylesheet"
+href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+/>
+<style>
+body {
+margin: 0;
+font-family: Arial, sans-serif;
+display: grid;
+grid-template-columns: 360px 1fr;
+height: 100vh;
+}
+aside {
+padding: 16px;
+background: #f4f6f4;
+border-right: 1px solid #d0d0d0;
+overflow-y: auto;
+}
+h1 {
+font-size: 22px;
+9
+margin-top: 0;
+}
+label {
+font-weight: bold;
+display: block;
+margin-top: 12px;
+}
+select, button {
+width: 100%;
+padding: 8px;
+margin-top: 6px;
+margin-bottom: 10px;
+box-sizing: border-box;
+}
+button {
+cursor: pointer;
+border: none;
+background: #2d6a4f;
+color: white;
+font-weight: bold;
+border-radius: 4px;
+}
+button:hover {
+background: #1b4332;
+}
+#map {
+height: 100vh;
+}
+.metric {
+background: white;
+padding: 10px;
+margin-bottom: 8px;
+border-radius: 6px;
+border: 1px solid #ddd;
+}
+pre {
+background: white;
+border: 1px solid #ddd;
+padding: 12px;
+white-space: pre-wrap;
+border-radius: 6px;
+}
+</style>
+</head>
+<body>
+<aside>
+<h1>Espécies Invasoras</h1>
+<p>Protótipo para visualização, indicadores e relatório automático.</p>
+10
+<label for="speciesFilter">Filtrar por espécie</label>
+<select id="speciesFilter">
+<option value="">Todas as espécies</option>
+</select>
+<h2>Indicadores</h2>
+<div id="summary">A carregar indicadores...</div>
+<button id="templateButton">Gerar relatório por template</button>
+<button id="reportButton">Gerar relatório com IA</button>
+<h2>Relatório</h2>
+<pre id="report">O relatório será apresentado aqui.</pre>
+</aside>
+<div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const API_URL = "http://localhost:8000";
+const map = L.map("map").setView([41.1579, -8.6291], 11);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+attribution: "© OpenStreetMap contributors"
+}).addTo(map);
+let records = [];
+let markers = [];
+async function loadRecords() {
+const response = await fetch(`${API_URL}/records`);
+records = await response.json();
+showMarkers(records);
+}
+async function loadSpecies() {
+const response = await fetch(`${API_URL}/species`);
+const speciesList = await response.json();
+const select = document.getElementById("speciesFilter");
+speciesList.forEach(species => {
+const option = document.createElement("option");
+option.value = species;
+option.textContent = species;
+select.appendChild(option);
+});
+}
+async function loadSummary() {
+const response = await fetch(`${API_URL}/summary`);
+const summary = await response.json();
+document.getElementById("summary").innerHTML = `
+11
+<div class="metric"><strong>Total de registos:</strong><br>${summary.total_records}</div>
+<div class="metric"><strong>Espécie dominante:</strong><br>${summary.most_common_species}</div>
+<div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}<`;
+}
+function showMarkers(data) {
+markers.forEach(marker => marker.remove());
+markers = [];
+data.forEach(record => {
+const marker = L.marker([record.latitude, record.longitude])
+.addTo(map)
+.bindPopup(`
+<strong>${record.species}</strong><br>
+Município: ${record.municipality}<br>
+Data: ${record.date}<br>
+Fonte: ${record.source}
+`);
+markers.push(marker);
+});
+}
+function filterBySpecies() {
+const selectedSpecies = document.getElementById("speciesFilter").value;
+const filteredRecords = selectedSpecies
+? records.filter(record => record.species === selectedSpecies)
+: records;
+showMarkers(filteredRecords);
+}
+async function generateTemplateReport() {
+document.getElementById("report").textContent = "A gerar relatório por template...";
+const response = await fetch(`${API_URL}/report-template`, {
+method: "POST"
+});
+const data = await response.json();
+document.getElementById("report").textContent = data.report;
+}
+async function generateAIReport() {
+document.getElementById("report").textContent = "A gerar relatório com IA...";
+const response = await fetch(`${API_URL}/report`, {
+method: "POST"
+});
+const data = await response.json();
+const validationText = data.validation
+12
+? `\n\nValidação automática:\n${JSON.stringify(data.validation, null, 2)}`
+: "";
+document.getElementById("report").textContent =
+`[Fonte: ${data.source}]\n\n${data.report}${validationText}`;
+}
+document.getElementById("speciesFilter").addEventListener("change", filterBySpecies);
+document.getElementById("templateButton").addEventListener("click", generateTemplateReport);
+document.getElementById("reportButton").addEventListener("click", generateAIReport);
+loadRecords();
+loadSpecies();
+loadSummary();
+</script>
+</body>
+</html>

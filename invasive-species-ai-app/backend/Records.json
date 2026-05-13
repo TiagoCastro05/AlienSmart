@@ -1,0 +1,272 @@
+[
+{
+"id": 1,
+"species": "Acacia dealbata",
+"latitude": 41.1579,
+"longitude": -8.6291,
+"date": "2026-03-12",
+"municipality": "Porto",
+"source": "observação de campo"
+},
+{
+"id": 2,
+"species": "Cortaderia selloana",
+"latitude": 41.1333,
+"longitude": -8.6177,
+"date": "2026-03-15",
+"municipality": "Vila Nova de Gaia",
+"source": "observação de campo"
+},
+{
+"id": 3,
+"species": "Ailanthus altissima",
+"latitude": 41.1821,
+"longitude": -8.6891,
+"date": "2026-03-20",
+"municipality": "Matosinhos",
+"source": "cidadão cientista"
+},
+{
+"id": 4,
+"species": "Acacia dealbata",
+"latitude": 41.1496,
+"longitude": -8.6109,
+"date": "2026-04-01",
+"municipality": "Porto",
+"source": "observação de campo"
+},
+{
+"id": 5,
+"species": "Cortaderia selloana",
+"latitude": 41.1240,
+"longitude": -8.6110,
+"date": "2026-04-03",
+"municipality": "Vila Nova de Gaia",
+"source": "cidadão cientista"
+},
+{
+"id": 6,
+"species": "Acacia dealbata",
+"latitude": 41.1700,
+"longitude": -8.6200,
+"date": "2026-04-05",
+"municipality": "Porto",
+"source": "observação de campo"
+},
+{
+"id": 7,
+"species": "Ailanthus altissima",
+"latitude": 41.2050,
+"longitude": -8.6500,
+"date": "2026-04-08",
+"municipality": "Matosinhos",
+"source": "observação de campo"
+},
+{
+"id": 8,
+"species": "Tradescantia fluminensis",
+"latitude": 41.1100,
+"longitude": -8.5900,
+"date": "2026-04-10",
+"municipality": "Vila Nova de Gaia",
+"source": "observação de campo"
+},
+{
+"id": 9,
+"species": "Acacia dealbata",
+"latitude": 41.1900,
+"longitude": -8.7050,
+"date": "2026-04-11",
+"municipality": "Matosinhos",
+"source": "cidadão cientista"
+},
+{
+"id": 10,
+"species": "Cortaderia selloana",
+"latitude": 41.1450,
+"longitude": -8.6500,
+"date": "2026-04-12",
+"municipality": "Porto",
+"source": "observação de campo"
+},
+{
+"id": 11,
+"species": "Acacia dealbata",
+"latitude": 41.1655,
+"longitude": -8.6420,
+"date": "2026-04-13",
+"municipality": "Porto",
+"source": "observação de campo"
+},
+{
+"id": 12,
+"species": "Ailanthus altissima",
+"latitude": 41.2150,
+"longitude": -8.6670,
+"date": "2026-04-14",
+"municipality": "Matosinhos",
+"source": "cidadão cientista"
+},
+{
+"id": 13,
+"species": "Cortaderia selloana",
+"latitude": 41.1180,
+"longitude": -8.5980,
+"date": "2026-04-15",
+"municipality": "Vila Nova de Gaia",
+"source": "observação de campo"
+},
+{
+"id": 14,
+"species": "Tradescantia fluminensis",
+"latitude": 41.1520,
+"longitude": -8.6040,
+"date": "2026-04-16",
+"municipality": "Porto",
+"source": "observação de campo"
+},
+{
+"id": 15,
+"species": "Acacia dealbata",
+"latitude": 41.2020,
+"longitude": -8.6910,
+"date": "2026-04-17",
+"municipality": "Matosinhos",
+"source": "observação de campo"
+},
+{
+    "id": 16,
+    "species": "Carpobrotus edulis",
+    "latitude": 41.1750,
+    "longitude": -8.6920,
+    "date": "2026-04-18",
+    "municipality": "Matosinhos",
+    "source": "cidadão cientista"
+  },
+  {
+    "id": 17,
+    "species": "Acacia dealbata",
+    "latitude": 41.1210,
+    "longitude": -8.6020,
+    "date": "2026-04-19",
+    "municipality": "Vila Nova de Gaia",
+    "source": "observação de campo"
+  },
+  {
+    "id": 18,
+    "species": "Cortaderia selloana",
+    "latitude": 41.1550,
+    "longitude": -8.6350,
+    "date": "2026-04-20",
+    "municipality": "Porto",
+    "source": "observação de campo"
+  },
+  {
+    "id": 19,
+    "species": "Ailanthus altissima",
+    "latitude": 41.1380,
+    "longitude": -8.6140,
+    "date": "2026-04-21",
+    "municipality": "Vila Nova de Gaia",
+    "source": "cidadão cientista"
+  },
+  {
+    "id": 20,
+    "species": "Tradescantia fluminensis",
+    "latitude": 41.1850,
+    "longitude": -8.6750,
+    "date": "2026-04-22",
+    "municipality": "Matosinhos",
+    "source": "observação de campo"
+  },
+  {
+    "id": 21,
+    "species": "Acacia dealbata",
+    "latitude": 41.1610,
+    "longitude": -8.6250,
+    "date": "2026-04-23",
+    "municipality": "Porto",
+    "source": "cidadão cientista"
+  },
+  {
+    "id": 22,
+    "species": "Carpobrotus edulis",
+    "latitude": 41.1420,
+    "longitude": -8.6650,
+    "date": "2026-04-24",
+    "municipality": "Porto",
+    "source": "observação de campo"
+  },
+  {
+    "id": 23,
+    "species": "Cortaderia selloana",
+    "latitude": 41.2100,
+    "longitude": -8.6800,
+    "date": "2026-04-25",
+    "municipality": "Matosinhos",
+    "source": "observação de campo"
+  },
+  {
+    "id": 24,
+    "species": "Ailanthus altissima",
+    "latitude": 41.1490,
+    "longitude": -8.6080,
+    "date": "2026-04-26",
+    "municipality": "Porto",
+    "source": "cidadão cientista"
+  },
+  {
+    "id": 25,
+    "species": "Tradescantia fluminensis",
+    "latitude": 41.1150,
+    "longitude": -8.6200,
+    "date": "2026-04-27",
+    "municipality": "Vila Nova de Gaia",
+    "source": "observação de campo"
+  },
+  {
+    "id": 26,
+    "species": "Acacia dealbata",
+    "latitude": 41.1950,
+    "longitude": -8.7100,
+    "date": "2026-04-28",
+    "municipality": "Matosinhos",
+    "source": "observação de campo"
+  },
+  {
+    "id": 27,
+    "species": "Cortaderia selloana",
+    "latitude": 41.1280,
+    "longitude": -8.6250,
+    "date": "2026-04-29",
+    "municipality": "Vila Nova de Gaia",
+    "source": "cidadão cientista"
+  },
+  {
+    "id": 28,
+    "species": "Carpobrotus edulis",
+    "latitude": 41.1050,
+    "longitude": -8.5850,
+    "date": "2026-04-30",
+    "municipality": "Vila Nova de Gaia",
+    "source": "observação de campo"
+  },
+  {
+    "id": 29,
+    "species": "Ailanthus altissima",
+    "latitude": 41.1680,
+    "longitude": -8.6450,
+    "date": "2026-05-01",
+    "municipality": "Porto",
+    "source": "observação de campo"
+  },
+  {
+    "id": 30,
+    "species": "Acacia dealbata",
+    "latitude": 41.1530,
+    "longitude": -8.6150,
+    "date": "2026-05-02",
+    "municipality": "Porto",
+    "source": "cidadão cientista"
+  }
+]

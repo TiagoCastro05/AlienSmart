@@ -24,7 +24,7 @@ overflow-y: auto;
 }
 h1 {
 font-size: 22px;
-9
+
 margin-top: 0;
 }
 label {
@@ -114,11 +114,21 @@ select.appendChild(option);
 async function loadSummary() {
 const response = await fetch(`${API_URL}/summary`);
 const summary = await response.json();
+const speciesLines = Object.entries(summary.species_count)
+.map(([species, count]) => `<li>${species}: ${count} registos</li>`)
+.join("");
+const hotspotLines = summary.hotspots.length > 0
+? summary.hotspots.map(h => `<li>${h.municipality}: ${h.records} registos</li>`).join("")
+: "<li>Nenhum hotspot definido pelo critério usado.</li>";
 document.getElementById("summary").innerHTML = `
-11
 <div class="metric"><strong>Total de registos:</strong><br>${summary.total_records}</div>
 <div class="metric"><strong>Espécie dominante:</strong><br>${summary.most_common_species}</div>
-<div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}<`;
+<div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}</div>
+<h3>Distribuição por espécie</h3>
+<ul>${speciesLines}</ul>
+<h3>Hotspots simples</h3>
+<ul>${hotspotLines}</ul>
+`;
 }
 function showMarkers(data) {
 markers.forEach(marker => marker.remove());
@@ -157,7 +167,6 @@ method: "POST"
 });
 const data = await response.json();
 const validationText = data.validation
-12
 ? `\n\nValidação automática:\n${JSON.stringify(data.validation, null, 2)}`
 : "";
 document.getElementById("report").textContent =

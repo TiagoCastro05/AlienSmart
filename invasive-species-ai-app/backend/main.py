@@ -58,7 +58,7 @@ def get_records_by_species(species_name: str):
 
 @app.get("/summary")
 def get_summary():
-    """Calcula indicadores de prevalência e hotspots simples."""
+    """Calcula indicadores simples de prevalência."""
     records = load_records()
     total = len(records)
     species_count = Counter(record["species"] for record in records)
@@ -84,27 +84,4 @@ def get_summary():
         "municipality_count": dict(municipality_count),
         "most_common_species": most_common_species,
         "most_common_municipality": most_common_municipality,
-        "hotspots": hotspots,
     }
-
-@app.post("/report-template")
-def generate_template_report():
-    summary = get_summary()
-    report = f"""
-Relatório preliminar sobre espécies invasoras
-Foram analisados {summary['total_records']} registos georreferenciados.
-A espécie com maior número de registos é {summary['most_common_species']}.
-O município com maior número de ocorrências é {summary['most_common_municipality']}.
-Distribuição por espécie:
-{summary['species_count']}
-Distribuição por município:
-{summary['municipality_count']}
-Este relatório deve ser interpretado com cautela, pois os dados podem refletir diferenças no esforço de amostragem.
-
-Recomendações preliminares:
-1. Validar os registos com observações de campo.
-2. Priorizar municípios com maior número de ocorrências.
-3. Atualizar a base de dados periodicamente.
-4. Cruzar estes dados com informação ecológica adicional.
-"""
-    return {"report": report.strip()}

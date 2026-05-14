@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from agent_report import generate_agent_report
 
 # Define o caminho para o ficheiro de dados
 DATA_FILE = Path(__file__).parent / "records.json"
@@ -84,4 +85,57 @@ def get_summary():
         "municipality_count": dict(municipality_count),
         "most_common_species": most_common_species,
         "most_common_municipality": most_common_municipality,
+    }
+def validate_report_text(report: str, summary: dict) -> dict:
+    problems = []
+    # Verifica presença do total de registos (com segurança caso falte a chave)
+    total = str(summary.get("total_records", ""))
+    if total and total not in report:
+        problems.append("O número total de registos pode estar ausente ou incorreto.")
+
+    # Verifica espécie e município dominantes quando disponíveis
+    most_common_species = summary.get("most_common_species")
+    if most_common_species and most_common_species not in report:
+        problems.append("A espécie dominante não foi mencionada.")
+
+    most_common_municipality = summary.get("most_common_municipality")
+    if most_common_municipality and most_common_municipality not in report:
+        problems.append("O município dominante não foi mencionado.")
+
+    lower_report = report.lower()
+    if "limita" not in lower_report:
+        problems.append("O relatório pode não incluir limitações.")
+
+    return {
+        "valid": len(problems) == 0,
+        "problems": problems,
+    }
+
+
+@app.post("/report")
+def generate_report():
+    summary = get_summary()
+    try:
+        report = generate_agent_report()
+        source = "langchain_agent"
+    except Exception as error:
+        report = f"""
+Relatório preliminar gerado por template
+Não foi possível gerar o relatório com o agente de IA.
+Motivo técnico: {str(error)}
+Foram analisados {summary.get('total_records')} registos.
+A espécie dominante nos dados é {summary.get('most_common_species')}.
+O município com mais registos é {summary.get('most_common_municipality')}.
+Limitações:
+- Este relatório foi gerado por fallback determinístico.
+- A análise é apenas preliminar.
+- Os dados podem refletir enviesamentos de amostragem.
+""".strip()
+        source = "template_fallback"
+
+    validation = validate_report_text(report, summary)
+    return {
+        "source": source,
+        "report": report,
+        "validation": validation,
     }

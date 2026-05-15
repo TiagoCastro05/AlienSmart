@@ -101,8 +101,9 @@ def build_agent():
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY não definida no ficheiro .env")
+    
     model = ChatOpenAI(
-        model="gpt-4.1-mini",
+        model="gpt-5.4-nano",  # Alterado para o modelo ultra-económico atual
         temperature=0,
     )
     return create_agent(
@@ -114,6 +115,7 @@ def build_agent():
         ],
         system_prompt=SYSTEM_PROMPT,
     )
+  
 
 
 def generate_agent_report() -> str:

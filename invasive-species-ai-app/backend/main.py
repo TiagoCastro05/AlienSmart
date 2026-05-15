@@ -1,7 +1,7 @@
 from collections import Counter
 from pathlib import Path
 import json
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from agent_report import generate_agent_report
 
@@ -86,6 +86,8 @@ def get_summary():
         "most_common_species": most_common_species,
         "most_common_municipality": most_common_municipality,
     }
+
+
 def validate_report_text(report: str, summary: dict) -> dict:
     problems = []
     # Verifica presença do total de registos (com segurança caso falte a chave)
@@ -110,7 +112,42 @@ def validate_report_text(report: str, summary: dict) -> dict:
         "valid": len(problems) == 0,
         "problems": problems,
     }
+# Garante que tens este endpoint no backend/main.py
 
+@app.post("/report-template")
+def get_report_template():
+    """
+    Gera um relatório estático com base num template predefinido (Fallback).
+    Não consome créditos da OpenAI.
+    """
+    try:
+        # 1. Obter os dados determinísticos do teu próprio backend
+        summary_data = get_summary() # Ou a função/lógica que calcula o resumo
+        
+        # 2. Criar o texto fixo injetando as variáveis
+        report_text = f"""## 1. Título
+**Relatório Automatizado (Template): Prevalência de Espécies Invasoras**
+
+## 2. Resumo executivo
+Com base no sistema de dados, existem atualmente {summary_data.get('total_records', 0)} registos filtrados.
+A espécie mais abundante registada é *{summary_data.get('most_common_species', 'N/A')}*.
+
+## 3. Limitações
+- Este relatório foi gerado automaticamente por um template fixo e não contém interpretação contextualizada por IA.
+"""
+        
+        # 3. Retornar o formato esperado com o source correto
+        return {
+            "source": "template_fallback",
+            "report": report_text,
+            "validation": {
+                "valid": True,
+                "problems": []
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar template: {str(e)}")
+    
 
 @app.post("/report")
 def generate_report():

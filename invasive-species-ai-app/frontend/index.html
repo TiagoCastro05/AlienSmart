@@ -93,11 +93,13 @@ attribution: "© OpenStreetMap contributors"
 }).addTo(map);
 let records = [];
 let markers = [];
+
 async function loadRecords() {
 const response = await fetch(`${API_URL}/records`);
 records = await response.json();
 showMarkers(records);
 }
+
 async function loadSpecies() {
 const response = await fetch(`${API_URL}/species`);
 const speciesList = await response.json();
@@ -109,15 +111,34 @@ option.textContent = species;
 select.appendChild(option);
 });
 }
+
 async function loadSummary() {
 const response = await fetch(`${API_URL}/summary`);
 const summary = await response.json();
+
+// Construir as linhas de distribuição de espécies se existirem nos dados [cite: 615, 616]
+let speciesLines = "";
+if (summary.species_count && summary.species_percentages) {
+    speciesLines = Object.entries(summary.species_count)
+    .map(([species, count]) => `<li>${species}: ${count} registos (${summary.species_percentages[species]}%)</li>`)
+    .join("");
+}
+
+// Construir as linhas de hotspots se existirem [cite: 618, 619]
+let hotspotLines = "<li>Nenhum hotspot definido.</li>";
+if (summary.hotspots && summary.hotspots.length > 0) {
+    hotspotLines = summary.hotspots.map(h => `<li>${h.municipality}: ${h.records} registos</li>`).join("");
+}
+
 document.getElementById("summary").innerHTML = `
-11
 <div class="metric"><strong>Total de registos:</strong><br>${summary.total_records}</div>
 <div class="metric"><strong>Espécie dominante:</strong><br>${summary.most_common_species}</div>
-<div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}<`;
+<div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}</div>
+${speciesLines ? `<h3>Distribuição por espécie</h3><ul>${speciesLines}</ul>` : ''}
+${summary.hotspots ? `<h3>Hotspots simples</h3><ul>${hotspotLines}</ul>` : ''}
+`;
 }
+
 function showMarkers(data) {
 markers.forEach(marker => marker.remove());
 markers = [];
@@ -133,6 +154,7 @@ Fonte: ${record.source}
 markers.push(marker);
 });
 }
+
 function filterBySpecies() {
 const selectedSpecies = document.getElementById("speciesFilter").value;
 const filteredRecords = selectedSpecies
@@ -140,6 +162,7 @@ const filteredRecords = selectedSpecies
 : records;
 showMarkers(filteredRecords);
 }
+
 async function generateTemplateReport() {
 document.getElementById("report").textContent = "A gerar relatório por template...";
 const response = await fetch(`${API_URL}/report-template`, {
@@ -148,6 +171,7 @@ method: "POST"
 const data = await response.json();
 document.getElementById("report").textContent = data.report;
 }
+
 async function generateAIReport() {
 document.getElementById("report").textContent = "A gerar relatório com IA...";
 const response = await fetch(`${API_URL}/report`, {
@@ -155,15 +179,16 @@ method: "POST"
 });
 const data = await response.json();
 const validationText = data.validation
-12
 ? `\n\nValidação automática:\n${JSON.stringify(data.validation, null, 2)}`
 : "";
 document.getElementById("report").textContent =
 `[Fonte: ${data.source}]\n\n${data.report}${validationText}`;
 }
+
 document.getElementById("speciesFilter").addEventListener("change", filterBySpecies);
 document.getElementById("templateButton").addEventListener("click", generateTemplateReport);
 document.getElementById("reportButton").addEventListener("click", generateAIReport);
+
 loadRecords();
 loadSpecies();
 loadSummary();

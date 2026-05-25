@@ -1,0 +1,41 @@
+LLM MODES - LOCAL (OLLAMA) E ONLINE (OPENAI)
+
+Objetivo
+- Alternar entre modo local (Ollama) e modo online (OpenAI) no backend.
+
+Requisitos
+- Local: Ollama instalado e a correr.
+- Online: chave OPENAI_API_KEY definida no .env.
+
+Modo local (Ollama)
+1) Instalar dependencias
+   pip install -r Requirements.txt
+2) Garantir o modelo local
+   ollama pull llama3.2
+3) Usar ChatOllama no codigo
+   from langchain_ollama import ChatOllama
+   model = ChatOllama(model="llama3.2", temperature=0)
+4) Opcional: definir URL do Ollama (se nao for localhost)
+   No .env:
+   OLLAMA_BASE_URL=http://localhost:11434
+   E no codigo (exemplo):
+   model = ChatOllama(model="llama3.2", temperature=0, base_url=os.getenv("OLLAMA_BASE_URL"))
+
+Modo online (OpenAI)
+1) Instalar dependencias
+   pip install -r Requirements.txt
+2) Definir chave no .env
+   OPENAI_API_KEY=coloca_a_tua_chave
+3) Usar ChatOpenAI no codigo
+   from langchain_openai import ChatOpenAI
+   model = ChatOpenAI(model="gpt-4.1-mini", temperature=0)
+
+Alternancia rapida (manual)
+- Trocar o import e a criacao do modelo no ficheiro agent_report.py
+- Garantir que Requirements.txt inclui o pacote correto:
+  - Local: langchain-ollama
+  - Online: langchain-openai
+
+Notas
+- O ficheiro .env nao deve ser enviado para o repositorio publico.
+- Se precisares de ambos os modos, podes manter os dois pacotes e escolher por variavel de ambiente.

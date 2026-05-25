@@ -2,11 +2,10 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 import json
-import os
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
-from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
 
 load_dotenv()
 DATA_FILE = Path(__file__).parent / "records.json"
@@ -98,12 +97,8 @@ Estrutura obrigatória do relatório:
 
 
 def build_agent():
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY não definida no ficheiro .env")
-    
-    model = ChatOpenAI(
-        model="gpt-5.4-nano",  # Alterado para o modelo ultra-económico atual
+    model = ChatOllama(
+        model="llama3.2",
         temperature=0,
     )
     return create_agent(

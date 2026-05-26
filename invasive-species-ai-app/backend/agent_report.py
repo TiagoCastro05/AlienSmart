@@ -122,12 +122,10 @@ def normalize_report_level(level: str | None) -> str:
 
 
 def build_agent():
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY não definida no ficheiro .env")
-    
-    model = ChatOpenAI(
-        model="gpt-5.4-nano",  # Alterado para o modelo ultra-económico atual
+    """Gera a instância do agente de IA local usando Ollama."""
+    # Usamos o ChatOllama com o modelo llama3.2 para garantir suporte a ferramentas (Tool Calling)
+    model = ChatOllama(
+        model="llama3.2",
         temperature=0,
     )
 

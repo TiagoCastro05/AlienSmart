@@ -1,9 +1,18 @@
 from collections import Counter
 from pathlib import Path
+import io
 import json
-from fastapi import FastAPI, HTTPException
+import textwrap
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from agent_report import generate_agent_report
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from agent_report import generate_agent_report, normalize_report_level
 
 # Define o caminho para o ficheiro de dados
 DATA_FILE = Path(__file__).parent / "records.json"
@@ -112,67 +121,182 @@ def validate_report_text(report: str, summary: dict) -> dict:
         "valid": len(problems) == 0,
         "problems": problems,
     }
+
+
+def build_template_report(summary: dict, level: str) -> str:
+    total = summary.get("total_records", 0)
+    species = summary.get("most_common_species", "N/A")
+    municipality = summary.get("most_common_municipality", "N/A")
+    if level == "executivo":
+        return f"""## 1. Titulo
+**Relatorio Executivo: Especies Invasoras**
+
+## 2. Resumo executivo
+Foram analisados {total} registos. A especie dominante e *{species}* e o municipio com mais registos e *{municipality}*.
+
+## 3. Limitações
+- Relatorio baseado em dados disponiveis no sistema.
+- Analise preliminar sem validacao externa.
+"""
+    if level == "publico":
+        return f"""## 1. Titulo
+**Relatorio Publico: Especies Invasoras**
+
+## 2. Resumo
+Este relatorio usa {total} registos. A especie mais observada foi *{species}* e o municipio com mais registos foi *{municipality}*.
+
+## 3. Limitações
+- Os dados podem ter falhas e lacunas.
+- O texto e apenas preliminar.
+"""
+    return f"""## 1. Titulo
+**Relatorio Tecnico: Prevalencia de Especies Invasoras**
+
+## 2. Resumo executivo
+Foram analisados {total} registos. A especie dominante e *{species}* e o municipio com mais registos e *{municipality}*.
+
+## 3. Limitações
+- Relatorio gerado automaticamente.
+- Pode existir enviesamento de amostragem.
+"""
+
+
+def build_report_payload(level: str) -> dict:
+    summary = get_summary()
+    try:
+        report = generate_agent_report(level)
+        source = "langchain_agent"
+    except Exception as error:
+        report = build_template_report(summary, level)
+        report = f"""{report}
+
+Motivo tecnico: {str(error)}
+""".strip()
+        source = "template_fallback"
+    validation = validate_report_text(report, summary)
+    return {
+        "source": source,
+        "report": report,
+        "validation": validation,
+        "summary": summary,
+        "level": level,
+    }
+
+
+def build_charts(summary: dict) -> list[bytes]:
+    charts: list[bytes] = []
+    for title, data in (
+        ("Registos por especie", summary.get("species_count", {})),
+        ("Registos por municipio", summary.get("municipality_count", {})),
+    ):
+        if not data:
+            continue
+        items = sorted(data.items(), key=lambda item: item[1], reverse=True)[:8]
+        labels = [item[0] for item in items]
+        values = [item[1] for item in items]
+        fig, ax = plt.subplots(figsize=(6.5, 3.5))
+        ax.bar(labels, values, color="#2d6a4f")
+        ax.set_title(title)
+        ax.set_ylabel("Registos")
+        ax.tick_params(axis="x", rotation=30)
+        fig.tight_layout()
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png", dpi=150)
+        plt.close(fig)
+        buffer.seek(0)
+        charts.append(buffer.read())
+    return charts
+
+
+def build_pdf(report_text: str, level: str, summary: dict) -> bytes:
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    margin = 2 * cm
+    y = height - margin
+
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(margin, y, f"Relatorio ({level})")
+    y -= 1.2 * cm
+
+    pdf.setFont("Helvetica", 10)
+    clean_text = report_text.replace("**", "").replace("## ", "")
+    for paragraph in clean_text.split("\n"):
+        lines = textwrap.wrap(paragraph, width=95) if paragraph else [""]
+        for line in lines:
+            if y <= margin:
+                pdf.showPage()
+                pdf.setFont("Helvetica", 10)
+                y = height - margin
+            pdf.drawString(margin, y, line)
+            y -= 0.5 * cm
+        y -= 0.2 * cm
+
+    chart_images = build_charts(summary)
+    if chart_images:
+        pdf.showPage()
+        y = height - margin
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.drawString(margin, y, "Graficos")
+        y -= 1 * cm
+        for chart in chart_images:
+            if y <= 8 * cm:
+                pdf.showPage()
+                y = height - margin
+            image = ImageReader(io.BytesIO(chart))
+            pdf.drawImage(image, margin, y - 7 * cm, width=16 * cm, height=7 * cm, preserveAspectRatio=True)
+            y -= 8 * cm
+
+    pdf.save()
+    buffer.seek(0)
+    return buffer.read()
+
+
 # Garante que tens este endpoint no backend/main.py
 
 @app.post("/report-template")
-def get_report_template():
+def get_report_template(level: str = "tecnico"):
     """
     Gera um relatório estático com base num template predefinido (Fallback).
     Não consome créditos da OpenAI.
     """
     try:
-        # 1. Obter os dados determinísticos do teu próprio backend
-        summary_data = get_summary() # Ou a função/lógica que calcula o resumo
-        
-        # 2. Criar o texto fixo injetando as variáveis
-        report_text = f"""## 1. Título
-**Relatório Automatizado (Template): Prevalência de Espécies Invasoras**
-
-## 2. Resumo executivo
-Com base no sistema de dados, existem atualmente {summary_data.get('total_records', 0)} registos filtrados.
-A espécie mais abundante registada é *{summary_data.get('most_common_species', 'N/A')}*.
-
-## 3. Limitações
-- Este relatório foi gerado automaticamente por um template fixo e não contém interpretação contextualizada por IA.
-"""
-        
-        # 3. Retornar o formato esperado com o source correto
+        normalized_level = normalize_report_level(level)
+        summary_data = get_summary()
+        report_text = build_template_report(summary_data, normalized_level)
         return {
             "source": "template_fallback",
             "report": report_text,
             "validation": {
                 "valid": True,
                 "problems": []
-            }
+            },
+            "level": normalized_level,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao gerar template: {str(e)}")
     
 
 @app.post("/report")
-def generate_report():
-    summary = get_summary()
-    try:
-        report = generate_agent_report()
-        source = "langchain_agent"
-    except Exception as error:
-        report = f"""
-Relatório preliminar gerado por template
-Não foi possível gerar o relatório com o agente de IA.
-Motivo técnico: {str(error)}
-Foram analisados {summary.get('total_records')} registos.
-A espécie dominante nos dados é {summary.get('most_common_species')}.
-O município com mais registos é {summary.get('most_common_municipality')}.
-Limitações:
-- Este relatório foi gerado por fallback determinístico.
-- A análise é apenas preliminar.
-- Os dados podem refletir enviesamentos de amostragem.
-""".strip()
-        source = "template_fallback"
-
-    validation = validate_report_text(report, summary)
+def generate_report(level: str = "tecnico"):
+    normalized_level = normalize_report_level(level)
+    payload = build_report_payload(normalized_level)
     return {
-        "source": source,
-        "report": report,
-        "validation": validation,
+        "source": payload["source"],
+        "report": payload["report"],
+        "validation": payload["validation"],
+        "level": payload["level"],
     }
+
+
+@app.get("/report/pdf")
+def export_report_pdf(level: str = "tecnico"):
+    normalized_level = normalize_report_level(level)
+    payload = build_report_payload(normalized_level)
+    pdf_bytes = build_pdf(payload["report"], normalized_level, payload["summary"])
+    filename = f"relatorio_{normalized_level}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

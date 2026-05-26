@@ -103,6 +103,24 @@ Estrutura obrigatória do relatório:
 """
 
 
+LEVEL_PROMPTS = {
+    "tecnico": "Escreve com detalhe técnico, linguagem precisa e termos científicos quando adequados.",
+    "executivo": "Escreve de forma concisa, focada em decisões e síntese para gestores.",
+    "publico": "Escreve com linguagem acessível ao público geral, sem jargão técnico.",
+}
+
+
+def normalize_report_level(level: str | None) -> str:
+    if not level:
+        return "tecnico"
+    normalized = level.strip().lower()
+    if normalized in ("publico", "público"):
+        return "publico"
+    if normalized in ("executivo", "tecnico", "técnico"):
+        return "executivo" if normalized == "executivo" else "tecnico"
+    return "tecnico"
+
+
 def build_agent():
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -124,14 +142,17 @@ def build_agent():
     )
 
 
-def generate_agent_report() -> str:
+def generate_agent_report(level: str | None = None) -> str:
     """Invoca o agente para obter o relatório final estruturado."""
+    normalized_level = normalize_report_level(level)
     agent = build_agent()
     user_request = """
 Gera um relatório preliminar sobre a prevalência de espécies invasoras.
 Deves usar as ferramentas disponíveis para obter os dados de resumo.
 Não uses conhecimento externo para completar valores em falta.
 """
+    level_instruction = LEVEL_PROMPTS.get(normalized_level, LEVEL_PROMPTS["tecnico"])
+    user_request = f"{user_request}\nNivel do relatório: {normalized_level}. {level_instruction}"
     result = agent.invoke({
         "messages": [
             {"role": "user", "content": user_request}

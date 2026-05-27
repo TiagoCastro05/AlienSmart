@@ -57,6 +57,12 @@ def get_species():
     records = load_records()
     return sorted({record["species"] for record in records})
 
+@app.get("/municipalities")
+def get_municipalities():
+    """Devolve a lista de municípios presentes nos dados."""
+    records = load_records()
+    return sorted({record["municipality"] for record in records})
+
 @app.get("/records/by-species/{species_name}")
 def get_records_by_species(species_name: str):
     """Devolve os registos de uma espécie específica."""
@@ -67,22 +73,31 @@ def get_records_by_species(species_name: str):
     ]
 
 @app.get("/summary")
-def get_summary():
+def get_summary(species: str = None, municipality: str = None):
     """Calcula indicadores simples de prevalência."""
     records = load_records()
+    
+    # Filtrar por espécie se selecionada
+    if species:
+        records = [r for r in records if r["species"].lower() == species.lower()]
+    
+    # Filtrar por município se selecionado
+    if municipality:
+        records = [r for r in records if r["municipality"].lower() == municipality.lower()]
+    
     total = len(records)
     species_count = Counter(record["species"] for record in records)
     municipality_count = Counter(record["municipality"] for record in records)
     species_percentages = {
-        species: round((count / total) * 100, 1)
-        for species, count in species_count.items()
+        sp: round((count / total) * 100, 1)
+        for sp, count in species_count.items()
     } if total > 0 else {}
     hotspots = [
         {
-            "municipality": municipality,
+            "municipality": mun,
             "records": count,
         }
-        for municipality, count in municipality_count.most_common()
+        for mun, count in municipality_count.most_common()
         if count >= 3
     ]
     most_common_species = species_count.most_common(1)[0][0] if species_count else None
@@ -161,10 +176,10 @@ Foram analisados {total} registos. A especie dominante e *{species}* e o municip
 """
 
 
-def build_report_payload(level: str) -> dict:
-    summary = get_summary()
+def build_report_payload(level: str, species: str = None, municipality: str = None) -> dict:
+    summary = get_summary(species=species, municipality=municipality)
     try:
-        report = generate_agent_report(level)
+        report = generate_agent_report(level, species=species, municipality=municipality)
         source = "langchain_agent"
     except Exception as error:
         report = build_template_report(summary, level)
@@ -255,14 +270,14 @@ def build_pdf(report_text: str, level: str, summary: dict) -> bytes:
 # Garante que tens este endpoint no backend/main.py
 
 @app.post("/report-template")
-def get_report_template(level: str = "tecnico"):
+def get_report_template(level: str = "tecnico", species: str = None, municipality: str = None):
     """
     Gera um relatório estático com base num template predefinido (Fallback).
     Não consome créditos da OpenAI.
     """
     try:
         normalized_level = normalize_report_level(level)
-        summary_data = get_summary()
+        summary_data = get_summary(species=species, municipality=municipality)
         report_text = build_template_report(summary_data, normalized_level)
         return {
             "source": "template_fallback",
@@ -278,9 +293,9 @@ def get_report_template(level: str = "tecnico"):
     
 
 @app.post("/report")
-def generate_report(level: str = "tecnico"):
+def generate_report(level: str = "tecnico", species: str = None, municipality: str = None):
     normalized_level = normalize_report_level(level)
-    payload = build_report_payload(normalized_level)
+    payload = build_report_payload(normalized_level, species=species, municipality=municipality)
     return {
         "source": payload["source"],
         "report": payload["report"],
@@ -290,9 +305,9 @@ def generate_report(level: str = "tecnico"):
 
 
 @app.get("/report/pdf")
-def export_report_pdf(level: str = "tecnico"):
+def export_report_pdf(level: str = "tecnico", species: str = None, municipality: str = None):
     normalized_level = normalize_report_level(level)
-    payload = build_report_payload(normalized_level)
+    payload = build_report_payload(normalized_level, species=species, municipality=municipality)
     pdf_bytes = build_pdf(payload["report"], normalized_level, payload["summary"])
     filename = f"relatorio_{normalized_level}.pdf"
     return Response(

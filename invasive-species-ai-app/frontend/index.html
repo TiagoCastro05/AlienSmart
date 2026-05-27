@@ -1,179 +1,221 @@
 <!doctype html>
 <html lang="pt">
-<head>
-<meta charset="UTF-8" />
-<title>Espécies Invasoras — Protótipo</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link
-rel="stylesheet"
-href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-/>
-<style>
-body {
-margin: 0;
-font-family: Arial, sans-serif;
-display: grid;
-grid-template-columns: 360px 1fr;
-height: 100vh;
-}
-aside {
-padding: 16px;
-background: #f4f6f4;
-border-right: 1px solid #d0d0d0;
-overflow-y: auto;
-}
-h1 {
-font-size: 22px;
-margin-top: 0;
-}
-label {
-font-weight: bold;
-display: block;
-margin-top: 12px;
-}
-select, button {
-width: 100%;
-padding: 8px;
-margin-top: 6px;
-margin-bottom: 10px;
-box-sizing: border-box;
-}
-button {
-cursor: pointer;
-border: none;
-background: #2d6a4f;
-color: white;
-font-weight: bold;
-border-radius: 4px;
-}
-button:hover {
-background: #1b4332;
-}
-#map {
-height: 100vh;
-}
-.metric {
-background: white;
-padding: 10px;
-margin-bottom: 8px;
-border-radius: 6px;
-border: 1px solid #ddd;
-}
-pre {
-background: white;
-border: 1px solid #ddd;
-padding: 12px;
-white-space: pre-wrap;
-border-radius: 6px;
-}
-.chart-card {
-background: white;
-padding: 10px;
-margin-bottom: 12px;
-border-radius: 6px;
-border: 1px solid #ddd;
-}
-.chart-card h3 {
-margin: 6px 0 10px;
-font-size: 14px;
-}
-.report-actions {
-display: grid;
-gap: 8px;
-}
-</style>
-</head>
-<body>
-<aside>
-<h1>Espécies Invasoras</h1>
-<p>Protótipo para visualização, indicadores e relatório automático.</p>
-<label for="speciesFilter">Filtrar por espécie</label>
-<select id="speciesFilter">
-<option value="">Todas as espécies</option>
-</select>
-<label for="reportLevel">Nível do relatório</label>
-<select id="reportLevel">
-<option value="tecnico">Técnico</option>
-<option value="executivo">Executivo</option>
-<option value="publico">Público geral</option>
-</select>
-<h2>Indicadores</h2>
-<div id="summary">A carregar indicadores...</div>
-<div id="chartsPanel" hidden></div>
-<div class="report-actions">
-<button id="templateButton">Gerar relatório por template</button>
-<button id="reportButton">Gerar relatório com IA</button>
-<button id="pdfButton">Exportar relatório em PDF</button>
-</div>
-<h2>Relatório</h2>
-<pre id="report">O relatório será apresentado aqui.</pre>
-</aside>
-<div id="map"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script>
-const API_URL = "http://localhost:8000";
-const map = L.map("map").setView([41.1579, -8.6291], 11);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-attribution: "© OpenStreetMap contributors"
-}).addTo(map);
-let records = [];
-let markers = [];
-let speciesChart;
-let municipalityChart;
+  <head>
+    <meta charset="UTF-8" />
+    <title>Espécies Invasoras — Protótipo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        height: 100vh;
+      }
+      aside {
+        padding: 16px;
+        background: #f4f6f4;
+        border-right: 1px solid #d0d0d0;
+        overflow-y: auto;
+      }
+      h1 {
+        font-size: 22px;
+        margin-top: 0;
+      }
+      label {
+        font-weight: bold;
+        display: block;
+        margin-top: 12px;
+      }
+      select,
+      button {
+        width: 100%;
+        padding: 8px;
+        margin-top: 6px;
+        margin-bottom: 10px;
+        box-sizing: border-box;
+      }
+      button {
+        cursor: pointer;
+        border: none;
+        background: #2d6a4f;
+        color: white;
+        font-weight: bold;
+        border-radius: 4px;
+      }
+      button:hover {
+        background: #1b4332;
+      }
+      button:disabled {
+        background: #a0a0a0;
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+      button:disabled:hover {
+        background: #a0a0a0;
+      }
+      #map {
+        height: 100vh;
+      }
+      .metric {
+        background: white;
+        padding: 10px;
+        margin-bottom: 8px;
+        border-radius: 6px;
+        border: 1px solid #ddd;
+      }
+      pre {
+        background: white;
+        border: 1px solid #ddd;
+        padding: 12px;
+        white-space: pre-wrap;
+        border-radius: 6px;
+      }
+      .chart-card {
+        background: white;
+        padding: 10px;
+        margin-bottom: 12px;
+        border-radius: 6px;
+        border: 1px solid #ddd;
+      }
+      .chart-card h3 {
+        margin: 6px 0 10px;
+        font-size: 14px;
+      }
+      .report-actions {
+        display: grid;
+        gap: 8px;
+      }
+      .pdf-button {
+        width: auto;
+        padding: 6px 12px;
+        margin-top: 8px;
+        margin-bottom: 12px;
+        font-size: 12px;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <h1>Espécies Invasoras</h1>
+      <p>Protótipo para visualização, indicadores e relatório automático.</p>
+      <label for="speciesFilter">Filtrar por espécie</label>
+      <select id="speciesFilter">
+        <option value="">Todas as espécies</option>
+      </select>
+      <label for="municipalityFilter">Filtrar por munícípio</label>
+      <select id="municipalityFilter">
+        <option value="">Todos os municípios</option>
+      </select>
+      <label for="reportLevel">Nível do relatório</label>
+      <select id="reportLevel">
+        <option value="tecnico">Técnico</option>
+        <option value="executivo">Executivo</option>
+        <option value="publico">Público geral</option>
+      </select>
+      <h2>Indicadores</h2>
+      <div id="summary">A carregar indicadores...</div>
+      <div id="chartsPanel" hidden></div>
+      <div class="report-actions">
+        <button id="templateButton">Gerar relatório por template</button>
+        <button id="reportButton">Gerar relatório com IA</button>
+      </div>
+      <h2>Relatório</h2>
+      <button id="pdfButton" class="pdf-button" disabled>
+        Converter para PDF
+      </button>
+      <pre id="report">O relatório será apresentado aqui.</pre>
+    </aside>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script>
+      const API_URL = "http://localhost:8000";
+      const map = L.map("map").setView([41.1579, -8.6291], 11);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap contributors",
+      }).addTo(map);
+      let records = [];
+      let markers = [];
+      let speciesChart;
+      let municipalityChart;
+      let speciesDistributionChart;
 
-async function loadRecords() {
-const response = await fetch(`${API_URL}/records`);
-records = await response.json();
-showMarkers(records);
-}
+      async function loadRecords() {
+        const response = await fetch(`${API_URL}/records`);
+        records = await response.json();
+        showMarkers(records);
+      }
 
-async function loadSpecies() {
-const response = await fetch(`${API_URL}/species`);
-const speciesList = await response.json();
-const select = document.getElementById("speciesFilter");
-speciesList.forEach(species => {
-const option = document.createElement("option");
-option.value = species;
-option.textContent = species;
-select.appendChild(option);
-});
-}
+      async function loadSpecies() {
+        const response = await fetch(`${API_URL}/species`);
+        const speciesList = await response.json();
+        const select = document.getElementById("speciesFilter");
+        speciesList.forEach((species) => {
+          const option = document.createElement("option");
+          option.value = species;
+          option.textContent = species;
+          select.appendChild(option);
+        });
+      }
 
-async function loadSummary() {
-const response = await fetch(`${API_URL}/summary`);
-const summary = await response.json();
+      async function loadMunicipalities() {
+        const response = await fetch(`${API_URL}/municipalities`);
+        const municipalitiesList = await response.json();
+        const select = document.getElementById("municipalityFilter");
+        municipalitiesList.forEach((municipality) => {
+          const option = document.createElement("option");
+          option.value = municipality;
+          option.textContent = municipality;
+          select.appendChild(option);
+        });
+      }
 
-// Construir as linhas de distribuição de espécies se existirem nos dados [cite: 615, 616]
-let speciesLines = "";
-if (summary.species_count && summary.species_percentages) {
-    speciesLines = Object.entries(summary.species_count)
-    .map(([species, count]) => `<li>${species}: ${count} registos (${summary.species_percentages[species]}%)</li>`)
-    .join("");
-}
+      async function loadSummary() {
+        const response = await fetch(`${API_URL}/summary`);
+        const summary = await response.json();
 
-// Construir as linhas de hotspots se existirem [cite: 618, 619]
-let hotspotLines = "<li>Nenhum hotspot definido.</li>";
-if (summary.hotspots && summary.hotspots.length > 0) {
-    hotspotLines = summary.hotspots.map(h => `<li>${h.municipality}: ${h.records} registos</li>`).join("");
-}
+        // Construir as linhas de distribuição de espécies se existirem nos dados [cite: 615, 616]
+        let speciesLines = "";
+        if (summary.species_count && summary.species_percentages) {
+          speciesLines = Object.entries(summary.species_count)
+            .map(
+              ([species, count]) =>
+                `<li>${species}: ${count} registos (${summary.species_percentages[species]}%)</li>`,
+            )
+            .join("");
+        }
 
-document.getElementById("summary").innerHTML = `
+        // Construir as linhas de hotspots se existirem [cite: 618, 619]
+        let hotspotLines = "<li>Nenhum hotspot definido.</li>";
+        if (summary.hotspots && summary.hotspots.length > 0) {
+          hotspotLines = summary.hotspots
+            .map((h) => `<li>${h.municipality}: ${h.records} registos</li>`)
+            .join("");
+        }
+
+        document.getElementById("summary").innerHTML = `
 <div class="metric"><strong>Total de registos:</strong><br>${summary.total_records}</div>
 <div class="metric"><strong>Espécie dominante:</strong><br>${summary.most_common_species}</div>
 <div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}</div>
-${speciesLines ? `<h3>Distribuição por espécie</h3><ul>${speciesLines}</ul>` : ''}
-${summary.hotspots ? `<h3>Hotspots simples</h3><ul>${hotspotLines}</ul>` : ''}
+${summary.hotspots ? `<h3>Hotspots simples</h3><ul>${hotspotLines}</ul>` : ""}
+<h3>Distribuição por espécie</h3>
+<canvas id="speciesDistributionChart" style="max-height: 200px;"></canvas>
 `;
 
-renderCharts(summary);
-}
+        renderCharts(summary);
+      }
 
-function renderCharts(summary) {
-const chartPanel = document.getElementById("chartsPanel");
-if (!chartPanel.hasChildNodes()) {
-chartPanel.hidden = false;
-chartPanel.innerHTML = `
+      function renderCharts(summary) {
+        const chartPanel = document.getElementById("chartsPanel");
+        if (!chartPanel.hasChildNodes()) {
+          chartPanel.hidden = false;
+          chartPanel.innerHTML = `
 <div class="chart-card">
 <h3>Registos por espécie</h3>
 <canvas id="speciesChart"></canvas>
@@ -183,120 +225,220 @@ chartPanel.innerHTML = `
 <canvas id="municipalityChart"></canvas>
 </div>
 `;
-}
+        }
 
-const speciesData = summary.species_count || {};
-const municipalityData = summary.municipality_count || {};
+        const speciesData = summary.species_count || {};
+        const municipalityData = summary.municipality_count || {};
 
-const speciesLabels = Object.keys(speciesData);
-const speciesValues = Object.values(speciesData);
-const municipalityLabels = Object.keys(municipalityData);
-const municipalityValues = Object.values(municipalityData);
+        const speciesLabels = Object.keys(speciesData);
+        const speciesValues = Object.values(speciesData);
+        const municipalityLabels = Object.keys(municipalityData);
+        const municipalityValues = Object.values(municipalityData);
 
-const speciesCtx = document.getElementById("speciesChart");
-const municipalityCtx = document.getElementById("municipalityChart");
+        const speciesCtx = document.getElementById("speciesChart");
+        const municipalityCtx = document.getElementById("municipalityChart");
+        const speciesDistributionCtx = document.getElementById(
+          "speciesDistributionChart",
+        );
 
-if (speciesChart) {
-speciesChart.destroy();
-}
-if (municipalityChart) {
-municipalityChart.destroy();
-}
+        if (speciesChart) {
+          speciesChart.destroy();
+        }
+        if (municipalityChart) {
+          municipalityChart.destroy();
+        }
+        if (speciesDistributionChart) {
+          speciesDistributionChart.destroy();
+        }
 
-speciesChart = new Chart(speciesCtx, {
-type: "bar",
-data: {
-labels: speciesLabels,
-datasets: [{
-label: "Registos",
-data: speciesValues,
-backgroundColor: "#2d6a4f",
-}]
-},
-options: {
-responsive: true,
-plugins: { legend: { display: false } },
-}
-});
+        speciesChart = new Chart(speciesCtx, {
+          type: "bar",
+          data: {
+            labels: speciesLabels,
+            datasets: [
+              {
+                label: "Registos",
+                data: speciesValues,
+                backgroundColor: "#2d6a4f",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+          },
+        });
 
-municipalityChart = new Chart(municipalityCtx, {
-type: "bar",
-data: {
-labels: municipalityLabels,
-datasets: [{
-label: "Registos",
-data: municipalityValues,
-backgroundColor: "#1b4332",
-}]
-},
-options: {
-responsive: true,
-plugins: { legend: { display: false } },
-}
-});
-}
+        municipalityChart = new Chart(municipalityCtx, {
+          type: "bar",
+          data: {
+            labels: municipalityLabels,
+            datasets: [
+              {
+                label: "Registos",
+                data: municipalityValues,
+                backgroundColor: "#1b4332",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+          },
+        });
 
-function showMarkers(data) {
-markers.forEach(marker => marker.remove());
-markers = [];
-data.forEach(record => {
-const marker = L.marker([record.latitude, record.longitude])
-.addTo(map)
-.bindPopup(`
+        // Gráfico de pizza para distribuição de espécies
+        speciesDistributionChart = new Chart(speciesDistributionCtx, {
+          type: "doughnut",
+          data: {
+            labels: speciesLabels,
+            datasets: [
+              {
+                label: "Registos",
+                data: speciesValues,
+                backgroundColor: [
+                  "#2d6a4f",
+                  "#1b4332",
+                  "#40916c",
+                  "#52b788",
+                  "#74c69d",
+                  "#b7e4c7",
+                  "#d8f3dc",
+                  "#95d5b2",
+                ],
+                borderColor: "#f4f6f4",
+                borderWidth: 2,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: { position: "bottom", labels: { padding: 10 } },
+            },
+          },
+        });
+      }
+
+      function showMarkers(data) {
+        markers.forEach((marker) => marker.remove());
+        markers = [];
+        data.forEach((record) => {
+          const marker = L.marker([record.latitude, record.longitude]).addTo(
+            map,
+          ).bindPopup(`
 <strong>${record.species}</strong><br>
 Município: ${record.municipality}<br>
 Data: ${record.date}<br>
 Fonte: ${record.source}
 `);
-markers.push(marker);
-});
-}
+          markers.push(marker);
+        });
+      }
 
-function filterBySpecies() {
-const selectedSpecies = document.getElementById("speciesFilter").value;
-const filteredRecords = selectedSpecies
-? records.filter(record => record.species === selectedSpecies)
-: records;
-showMarkers(filteredRecords);
-}
+      function filterBySpecies() {
+        const selectedSpecies = document.getElementById("speciesFilter").value;
+        const selectedMunicipality =
+          document.getElementById("municipalityFilter").value;
+        const filteredRecords = records.filter((record) => {
+          const speciesMatch =
+            !selectedSpecies || record.species === selectedSpecies;
+          const municipalityMatch =
+            !selectedMunicipality ||
+            record.municipality === selectedMunicipality;
+          return speciesMatch && municipalityMatch;
+        });
+        showMarkers(filteredRecords);
+      }
 
-async function generateTemplateReport() {
-document.getElementById("report").textContent = "A gerar relatório por template...";
-const level = document.getElementById("reportLevel").value;
-const response = await fetch(`${API_URL}/report-template?level=${level}`, {
-method: "POST"
-});
-const data = await response.json();
-document.getElementById("report").textContent = data.report;
-}
+      function filterByMunicipality() {
+        filterBySpecies();
+      }
 
-async function generateAIReport() {
-document.getElementById("report").textContent = "A gerar relatório com IA...";
-const level = document.getElementById("reportLevel").value;
-const response = await fetch(`${API_URL}/report?level=${level}`, {
-method: "POST"
-});
-const data = await response.json();
-const validationText = data.validation
-? `\n\nValidação automática:\n${JSON.stringify(data.validation, null, 2)}`
-: "";
-document.getElementById("report").textContent =
-`[Fonte: ${data.source} | Nivel: ${data.level}]\n\n${data.report}${validationText}`;
-}
+      async function generateTemplateReport() {
+        document.getElementById("report").textContent =
+          "A gerar relatório por template...";
+        const level = document.getElementById("reportLevel").value;
+        const selectedSpecies = document.getElementById("speciesFilter").value;
+        const selectedMunicipality =
+          document.getElementById("municipalityFilter").value;
+        const params = new URLSearchParams({ level });
+        if (selectedSpecies) {
+          params.append("species", selectedSpecies);
+        }
+        if (selectedMunicipality) {
+          params.append("municipality", selectedMunicipality);
+        }
+        const response = await fetch(
+          `${API_URL}/report-template?${params.toString()}`,
+          {
+            method: "POST",
+          },
+        );
+        const data = await response.json();
+        document.getElementById("report").textContent = data.report;
+        document.getElementById("pdfButton").disabled = false;
+      }
 
-function exportPdf() {
-const level = document.getElementById("reportLevel").value;
-window.open(`${API_URL}/report/pdf?level=${level}`, "_blank");
-}
+      async function generateAIReport() {
+        document.getElementById("report").textContent =
+          "A gerar relatório com IA...";
+        const level = document.getElementById("reportLevel").value;
+        const selectedSpecies = document.getElementById("speciesFilter").value;
+        const selectedMunicipality =
+          document.getElementById("municipalityFilter").value;
+        const params = new URLSearchParams({ level });
+        if (selectedSpecies) {
+          params.append("species", selectedSpecies);
+        }
+        if (selectedMunicipality) {
+          params.append("municipality", selectedMunicipality);
+        }
+        const response = await fetch(`${API_URL}/report?${params.toString()}`, {
+          method: "POST",
+        });
+        const data = await response.json();
+        const validationText = data.validation
+          ? `\n\nValidação automática:\n${JSON.stringify(data.validation, null, 2)}`
+          : "";
+        document.getElementById("report").textContent =
+          `[Fonte: ${data.source} | Nivel: ${data.level}]\n\n${data.report}${validationText}`;
+        document.getElementById("pdfButton").disabled = false;
+      }
 
-document.getElementById("speciesFilter").addEventListener("change", filterBySpecies);
-document.getElementById("templateButton").addEventListener("click", generateTemplateReport);
-document.getElementById("reportButton").addEventListener("click", generateAIReport);
-document.getElementById("pdfButton").addEventListener("click", exportPdf);
+      function exportPdf() {
+        const level = document.getElementById("reportLevel").value;
+        const selectedSpecies = document.getElementById("speciesFilter").value;
+        const selectedMunicipality =
+          document.getElementById("municipalityFilter").value;
+        const params = new URLSearchParams({ level });
+        if (selectedSpecies) {
+          params.append("species", selectedSpecies);
+        }
+        if (selectedMunicipality) {
+          params.append("municipality", selectedMunicipality);
+        }
+        window.open(`${API_URL}/report/pdf?${params.toString()}`, "_blank");
+      }
 
-loadRecords();
-loadSpecies();
-loadSummary();
-</script>
-</body>
+      document
+        .getElementById("speciesFilter")
+        .addEventListener("change", filterBySpecies);
+      document
+        .getElementById("municipalityFilter")
+        .addEventListener("change", filterByMunicipality);
+      document
+        .getElementById("templateButton")
+        .addEventListener("click", generateTemplateReport);
+      document
+        .getElementById("reportButton")
+        .addEventListener("click", generateAIReport);
+      document.getElementById("pdfButton").addEventListener("click", exportPdf);
+
+      loadRecords();
+      loadSpecies();
+      loadMunicipalities();
+      loadSummary();
+    </script>
+  </body>
 </html>

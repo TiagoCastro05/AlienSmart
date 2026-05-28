@@ -6,3 +6,8 @@ langchain-openai
 langchain-ollama
 matplotlib
 reportlab
+rasterio
+numpy
+geopandas
+rasterstats
+pyproj

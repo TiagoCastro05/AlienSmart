@@ -13,6 +13,16 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from agent_report import generate_agent_report, normalize_report_level
+from raster_tools import (
+    get_available_species as get_raster_species_list,
+    get_raster_files,
+    parse_raster_filename,
+    compute_suitable_area,
+    get_raster_stats,
+    compare_periods,
+    overlap_two_species,
+    scenario_matrix,
+)
 
 # Define o caminho para o ficheiro de dados
 DATA_FILE = Path(__file__).parent / "records.json"
@@ -315,3 +325,196 @@ def export_report_pdf(level: str = "tecnico", species: str = None, municipality:
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+# ============================================================================
+# ENDPOINTS DE RASTER - CAMADA 1: INVENTÁRIO E DESCOBERTA
+# ============================================================================
+
+@app.get("/raster/species")
+def get_raster_species():
+    """
+    Retorna lista de espécies disponíveis nos ficheiros raster.
+    Camada 1: Inventário e Descoberta.
+    """
+    return {"species": get_raster_species_list()}
+
+
+@app.get("/raster/files")
+def get_raster_files_endpoint(
+    species: str = None,
+    period: str = None,
+    scenario: str = None,
+    binary: bool = None
+):
+    """
+    Retorna ficheiros raster filtrados por critérios.
+    Camada 1: Inventário e Descoberta.
+    
+    Parâmetros:
+        - species: Nome científico (ex: "Ailanthus_altissima")
+        - period: "hist", "2041-2070", "2071-2100"
+        - scenario: "ssp126", "ssp370", "ssp585"
+        - binary: true/false para binários/contínuos
+    """
+    files = get_raster_files(
+        species=species,
+        period=period,
+        scenario=scenario,
+        binary=binary
+    )
+    return {
+        "count": len(files),
+        "files": [Path(f).name for f in files],
+    }
+
+
+@app.get("/raster/parse/{filename}")
+def parse_raster_filename_endpoint(filename: str):
+    """
+    Extrai metadados do nome de um ficheiro raster.
+    Camada 1: Inventário e Descoberta.
+    """
+    result = parse_raster_filename(filename)
+    if result is None:
+        raise HTTPException(status_code=400, detail="Nome de ficheiro inválido")
+    return result
+
+
+# ============================================================================
+# ENDPOINTS DE RASTER - CAMADA 2: SÍNTESE ESTATÍSTICA
+# ============================================================================
+
+@app.get("/raster/stats/{species}")
+def get_raster_stats_endpoint(
+    species: str,
+    period: str = "hist",
+    scenario: str = None
+):
+    """
+    Retorna estatísticas básicas de um raster de espécie.
+    Camada 2: Síntese Estatística.
+    
+    Parâmetros:
+        - species: Nome científico
+        - period: Período temporal
+        - scenario: Cenário climático (se aplicável)
+    """
+    files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
+    if not files:
+        raise HTTPException(status_code=404, detail=f"Nenhum raster encontrado para {species}")
+    
+    return {
+        "species": species,
+        "period": period,
+        "scenario": scenario,
+        "stats": get_raster_stats(files[0]),
+    }
+
+
+@app.get("/raster/suitable-area/{species}")
+def get_suitable_area(
+    species: str,
+    period: str = "hist",
+    scenario: str = None,
+    threshold: float = 0.5
+):
+    """
+    Calcula a área adequada de uma espécie.
+    Camada 2: Síntese Estatística.
+    """
+    files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
+    if not files:
+        raise HTTPException(status_code=404, detail=f"Nenhum raster encontrado para {species}")
+    
+    return {
+        "species": species,
+        "period": period,
+        "scenario": scenario,
+        "threshold": threshold,
+        "data": compute_suitable_area(files[0], threshold=threshold),
+    }
+
+
+@app.get("/raster/compare-periods/{species}")
+def compare_periods_endpoint(
+    species: str,
+    scenario: str = "ssp370"
+):
+    """
+    Compara área adequada entre períodos (hist, 2041-2070, 2071-2100).
+    Camada 2: Síntese Estatística.
+    """
+    return compare_periods(species=species, scenario=scenario)
+
+
+# ============================================================================
+# ENDPOINTS DE RASTER - CAMADA 3: SOBREPOSIÇÃO ESPACIAL
+# ============================================================================
+
+@app.get("/raster/overlap")
+def get_overlap(
+    species1: str,
+    species2: str,
+    period: str = "hist",
+    operation: str = "intersection"
+):
+    """
+    Calcula sobreposição entre dois rasters de espécies.
+    Camada 3: Sobreposição Espacial.
+    
+    Parâmetros:
+        - species1, species2: Nomes de espécies
+        - period: Período temporal
+        - operation: "intersection", "union", "difference"
+    """
+    if operation not in ["intersection", "union", "difference"]:
+        raise HTTPException(status_code=400, detail="Operação inválida")
+    
+    return overlap_two_species(
+        species1=species1,
+        species2=species2,
+        period=period,
+        operation=operation
+    )
+
+
+# ============================================================================
+# ENDPOINTS DE RASTER - CAMADA 4: COMPARAÇÃO DE CENÁRIOS
+# ============================================================================
+
+@app.get("/raster/scenarios/{species}")
+def get_scenarios(species: str):
+    """
+    Gera matriz período × cenário com áreas adequadas.
+    Camada 4: Comparação de Cenários.
+    
+    Retorna análise completa de expansão sob diferentes cenários climáticos.
+    """
+    return scenario_matrix(species=species)
+
+
+# ============================================================================
+# ENDPOINT ESPECIAL: AGENTE COM DADOS RASTER
+# ============================================================================
+
+@app.get("/raster/summary/{species}")
+def get_raster_summary(species: str):
+    """
+    Resumo completo de uma espécie com todos os dados raster disponíveis.
+    Combina todas as camadas para análise do agente.
+    """
+    species_list = get_raster_species_list()
+    if species not in species_list:
+        raise HTTPException(status_code=404, detail=f"Espécie não encontrada: {species}")
+    
+    return {
+        "species": species,
+        "available_periods": {
+            "hist": bool(get_raster_files(species=species, period="hist")),
+            "2041-2070": bool(get_raster_files(species=species, period="2041-2070")),
+            "2071-2100": bool(get_raster_files(species=species, period="2071-2100")),
+        },
+        "scenario_analysis": scenario_matrix(species=species),
+        "temporal_comparison": compare_periods(species=species),
+    }

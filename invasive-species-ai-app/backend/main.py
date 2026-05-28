@@ -180,7 +180,7 @@ def build_report_payload(level: str, species: str = None, municipality: str = No
     summary = get_summary(species=species, municipality=municipality)
     try:
         report = generate_agent_report(level, species=species, municipality=municipality)
-        source = "langchain_agent"
+        source = "Llama3.2_agent"
     except Exception as error:
         report = build_template_report(summary, level)
         report = f"""{report}

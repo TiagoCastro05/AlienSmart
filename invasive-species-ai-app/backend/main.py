@@ -63,9 +63,48 @@ def get_records():
 
 @app.get("/species")
 def get_species():
-    """Devolve a lista de espécies presentes nos dados."""
+    """
+    Devolve TODAS as espécies: do Records.json + dos rasters (145 espécies).
+    Combina dados históricos com dados de modelação de distribuição (SDM).
+    """
+    # Espécies do Records.json (dados históricos)
     records = load_records()
-    return sorted({record["species"] for record in records})
+    historical_species = set(record["species"] for record in records)
+    
+    # Espécies dos rasters (SDM/modelação)
+    raster_species = set(get_raster_species_list())
+    
+    # Combinar e ordenar
+    all_species = sorted(historical_species | raster_species)
+    return all_species
+
+@app.get("/species-with-data-types")
+def get_species_with_data_types():
+    """
+    Devolve espécies com indicação de tipo de dados disponível.
+    - 'historical': tem registos em Records.json
+    - 'raster': tem ficheiros GeoTIFF em Dados rasters
+    - 'both': tem ambos os tipos
+    """
+    records = load_records()
+    historical_species = set(record["species"] for record in records)
+    raster_species = set(get_raster_species_list())
+    
+    result = []
+    
+    # Espécies apenas com dados históricos
+    for sp in sorted(historical_species - raster_species):
+        result.append({"species": sp, "data_types": ["historical"]})
+    
+    # Espécies apenas com dados raster
+    for sp in sorted(raster_species - historical_species):
+        result.append({"species": sp, "data_types": ["raster"]})
+    
+    # Espécies com ambos
+    for sp in sorted(historical_species & raster_species):
+        result.append({"species": sp, "data_types": ["historical", "raster"]})
+    
+    return result
 
 @app.get("/municipalities")
 def get_municipalities():

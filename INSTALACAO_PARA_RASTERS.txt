@@ -1,0 +1,168 @@
+================================================================================
+ALIENSMART - INSTRUÇÕES DE INSTALAÇÃO PARA COLABORADOR
+================================================================================
+
+PREREQUISITOS:
+- Python 3.14+ (pythoncore-3.14-64)
+- Git (para fazer pull)
+- Windows PowerShell ou Terminal
+
+================================================================================
+PASSOS DE INSTALAÇÃO
+================================================================================
+
+1. CLONAR/ATUALIZAR REPOSITÓRIO
+   - Fazer pull do repositório como habitual
+   - Assegurar que tem a pasta "Dados rasters" com ficheiros .tif (1.652 arquivos)
+
+2. CRIAR AMBIENTE VIRTUAL (BACKEND)
+   
+   cd "C:\Users\...\invasive-species-ai-app\backend"
+   
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+
+3. INSTALAR DEPENDÊNCIAS PYTHON
+   
+   Copiar e correr EXATAMENTE este comando no terminal (com venv ativado):
+   
+   pip install fastapi uvicorn[standard] python-dotenv langchain langchain-openai langchain-ollama matplotlib reportlab rasterio numpy geopandas rasterstats pyproj
+   
+   OU usar o ficheiro requirements.txt:
+   
+   pip install -r Requirements.txt
+
+4. VERIFICAR INSTALAÇÃO
+   
+   python -c "import rasterio; import geopandas; import rasterstats; print('✓ Dependências OK')"
+
+5. INICIAR SERVIDOR
+   
+   cd backend
+   uvicorn main:app --reload
+   
+   Deve aparecer: "Uvicorn running on http://127.0.0.1:8000"
+
+6. VERIFICAR API
+   
+   Abrir browser: http://127.0.0.1:8000/docs
+   
+   OU testar endpoint:
+   
+   Powershell: Invoke-RestMethod -Uri 'http://127.0.0.1:8000/raster/species' -Method GET
+
+================================================================================
+ESTRUTURA DE PASTAS ESPERADA
+================================================================================
+
+AlienSmart/
+├── README.md
+├── invasive-species-ai-app/
+│   ├── backend/
+│   │   ├── .venv/                    ← CRIAR COM: python -m venv .venv
+│   │   ├── main.py
+│   │   ├── raster_tools.py           ← NOVO - Processamento de rasters
+│   │   ├── agent_report.py
+│   │   ├── Records.json
+│   │   ├── LLM_MODES.txt
+│   │   └── Requirements.txt          ← ATUALIZADO com novas dependências
+│   ├── frontend/
+│   │   └── index.html
+│   └── Dados rasters/                ← DEVE TER 1.652 ficheiros .tif
+│       ├── Acacia_dealbata_2979474_hist_eur.tif
+│       ├── Acacia_dealbata_2979474_2041_2070_ssp126_eur.tif
+│       └── ... (1.652 ficheiros no total)
+
+================================================================================
+DEPENDÊNCIAS INSTALADAS
+================================================================================
+
+DEPENDÊNCIAS EXISTENTES:
+- fastapi              (REST API framework)
+- uvicorn[standard]    (ASGI server)
+- python-dotenv        (Variáveis de ambiente)
+- langchain            (LLM chains)
+- langchain-openai     (OpenAI integration)
+- langchain-ollama     (Ollama integration)
+- matplotlib           (Gráficos)
+- reportlab            (Geração de PDFs)
+
+DEPENDÊNCIAS NOVAS (PARA RASTERS):
+- rasterio            (Leitura/escrita de GeoTIFF)
+- numpy               (Operações numéricas)
+- geopandas           (Operações geoespaciais)
+- rasterstats         (Estatísticas zoneadas)
+- pyproj              (Transformações de coordenadas)
+
+TOTAL: 13 pacotes
+
+================================================================================
+ENDPOINTS RASTER DISPONÍVEIS (APÓS INSTALAÇÃO)
+================================================================================
+
+Camada 1 - Inventário:
+  GET /raster/species              → Lista 145 espécies
+  GET /raster/files                → Ficheiros (filtro: species, period, scenario)
+  GET /raster/parse/{filename}     → Parsing de nomenclatura
+
+Camada 2 - Estatísticas:
+  GET /raster/suitable-area/{species}    → Área adequada (km²)
+  GET /raster/stats/{species}            → Estatísticas detalhadas
+  GET /raster/compare-periods/{species}  → Comparação temporal
+
+Camada 3 - Sobreposição:
+  GET /raster/overlap               → Intersecção entre espécies
+
+Camada 4 - Cenários:
+  GET /raster/scenarios/{species}   → Matriz período × cenário
+  GET /raster/summary/{species}     → Resumo com tendências
+
+================================================================================
+DADOS RASTER - INFORMAÇÕES TÉCNICAS
+================================================================================
+
+Formato: GeoTIFF binários/contínuos
+Quantidade: 1.652 ficheiros
+Espécies: 145 espécies invasoras
+CRS: EPSG:6933 (projeção igual-área para Portugal)
+Resolução: 1000m × 1000m
+Períodos: hist (1981-2024), 2041-2070, 2071-2100
+Cenários: ssp126 (baixas emissões), ssp370 (médias), ssp585 (altas)
+
+Exemplo: Acacia_dealbata_2979474_2041_2070_ssp370_bin_eur.tif
+         └─ Espécie    └─GBIF ID └─Período  └─Cenário └─Binário
+
+================================================================================
+RESOLUÇÃO DE PROBLEMAS
+================================================================================
+
+ERRO: "ModuleNotFoundError: No module named 'rasterio'"
+  → Assegurar que .venv está ATIVADO
+  → Correr: pip install rasterio --upgrade
+
+ERRO: "Uvicorn reload detecta mudanças infinitas"
+  → Normal durante desenvolvimento
+  → Esperar que complete a recompilação
+
+ERRO: "Nenhum raster encontrado"
+  → Verificar pasta "Dados rasters" tem 1.652 ficheiros .tif
+  → Caminho deve ser: AlienSmart/invasive-species-ai-app/Dados rasters/
+
+AVISO: "FutureWarning em rasterio"
+  → Ignorar - é compatível
+  → Configurado em raster_tools.py: warnings.filterwarnings("ignore")
+
+================================================================================
+CONTACTO EM CASO DE DÚVIDAS
+================================================================================
+
+Se tiver problemas:
+1. Verificar que python -m venv .venv funcionou
+2. Verificar que Requirements.txt tem todas as dependências
+3. Confirmar que "Dados rasters" tem os 1.652 ficheiros
+4. Testar endpoint: curl http://127.0.0.1:8000/raster/species
+
+================================================================================
+ÚLTIMA ATUALIZAÇÃO: 28 de Maio de 2026
+DESENVOLVEDOR: AlienSmart Team
+================================================================================

@@ -5,6 +5,7 @@ import json
 import textwrap
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.lib.utils import ImageReader
@@ -22,10 +23,14 @@ from raster_tools import (
     compare_periods,
     overlap_two_species,
     scenario_matrix,
+    get_raster_bounds,
+    get_raster_data_samples,
+    get_raster_legend,
 )
 
 # Define o caminho para o ficheiro de dados
 DATA_FILE = Path(__file__).parent / "records.json"
+RASTERS_DIR = Path(__file__).parent.parent / "Dados rasters"
 
 app = FastAPI(
     title="Invasive Species AI API",
@@ -33,7 +38,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Configuração de CORS para permitir que o frontend aceda à API
+# Configuração de CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,6 +46,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# [NOVO] Montar a pasta dos rasters para que o Leaflet consiga descarregar os .tif diretamente
+if RASTERS_DIR.exists():
+    app.mount("/rasters_data", StaticFiles(directory=RASTERS_DIR), name="rasters_data")
 
 def load_records() -> list[dict]:
     """Carrega os registos a partir do ficheiro JSON."""
@@ -63,58 +72,35 @@ def get_records():
 
 @app.get("/species")
 def get_species():
-    """
-    Devolve TODAS as espécies: do Records.json + dos rasters (145 espécies).
-    Combina dados históricos com dados de modelação de distribuição (SDM).
-    """
-    # Espécies do Records.json (dados históricos)
+    """Devolve TODAS as espécies: do Records.json + dos rasters."""
     records = load_records()
     historical_species = set(record["species"] for record in records)
-    
-    # Espécies dos rasters (SDM/modelação)
     raster_species = set(get_raster_species_list())
-    
-    # Combinar e ordenar
     all_species = sorted(historical_species | raster_species)
     return all_species
 
 @app.get("/species-with-data-types")
 def get_species_with_data_types():
-    """
-    Devolve espécies com indicação de tipo de dados disponível.
-    - 'historical': tem registos em Records.json
-    - 'raster': tem ficheiros GeoTIFF em Dados rasters
-    - 'both': tem ambos os tipos
-    """
     records = load_records()
     historical_species = set(record["species"] for record in records)
     raster_species = set(get_raster_species_list())
     
     result = []
-    
-    # Espécies apenas com dados históricos
     for sp in sorted(historical_species - raster_species):
         result.append({"species": sp, "data_types": ["historical"]})
-    
-    # Espécies apenas com dados raster
     for sp in sorted(raster_species - historical_species):
         result.append({"species": sp, "data_types": ["raster"]})
-    
-    # Espécies com ambos
     for sp in sorted(historical_species & raster_species):
         result.append({"species": sp, "data_types": ["historical", "raster"]})
-    
     return result
 
 @app.get("/municipalities")
 def get_municipalities():
-    """Devolve a lista de municípios presentes nos dados."""
     records = load_records()
     return sorted({record["municipality"] for record in records})
 
 @app.get("/records/by-species/{species_name}")
 def get_records_by_species(species_name: str):
-    """Devolve os registos de uma espécie específica."""
     records = load_records()
     return [
         record for record in records
@@ -123,14 +109,10 @@ def get_records_by_species(species_name: str):
 
 @app.get("/summary")
 def get_summary(species: str = None, municipality: str = None):
-    """Calcula indicadores simples de prevalência."""
     records = load_records()
     
-    # Filtrar por espécie se selecionada
     if species:
         records = [r for r in records if r["species"].lower() == species.lower()]
-    
-    # Filtrar por município se selecionado
     if municipality:
         records = [r for r in records if r["municipality"].lower() == municipality.lower()]
     
@@ -158,17 +140,16 @@ def get_summary(species: str = None, municipality: str = None):
         "municipality_count": dict(municipality_count),
         "most_common_species": most_common_species,
         "most_common_municipality": most_common_municipality,
+        "hotspots": hotspots,
     }
 
 
 def validate_report_text(report: str, summary: dict) -> dict:
     problems = []
-    # Verifica presença do total de registos (com segurança caso falte a chave)
     total = str(summary.get("total_records", ""))
     if total and total not in report:
         problems.append("O número total de registos pode estar ausente ou incorreto.")
 
-    # Verifica espécie e município dominantes quando disponíveis
     most_common_species = summary.get("most_common_species")
     if most_common_species and most_common_species not in report:
         problems.append("A espécie dominante não foi mencionada.")
@@ -192,37 +173,10 @@ def build_template_report(summary: dict, level: str) -> str:
     species = summary.get("most_common_species", "N/A")
     municipality = summary.get("most_common_municipality", "N/A")
     if level == "executivo":
-        return f"""## 1. Titulo
-**Relatorio Executivo: Especies Invasoras**
-
-## 2. Resumo executivo
-Foram analisados {total} registos. A especie dominante e *{species}* e o municipio com mais registos e *{municipality}*.
-
-## 3. Limitações
-- Relatorio baseado em dados disponiveis no sistema.
-- Analise preliminar sem validacao externa.
-"""
+        return f"""## 1. Titulo\n**Relatorio Executivo: Especies Invasoras**\n\n## 2. Resumo executivo\nForam analisados {total} registos. A especie dominante e *{species}* e o municipio com mais registos e *{municipality}*.\n\n## 3. Limitações\n- Relatorio baseado em dados disponiveis no sistema.\n- Analise preliminar sem validacao externa.\n"""
     if level == "publico":
-        return f"""## 1. Titulo
-**Relatorio Publico: Especies Invasoras**
-
-## 2. Resumo
-Este relatorio usa {total} registos. A especie mais observada foi *{species}* e o municipio com mais registos foi *{municipality}*.
-
-## 3. Limitações
-- Os dados podem ter falhas e lacunas.
-- O texto e apenas preliminar.
-"""
-    return f"""## 1. Titulo
-**Relatorio Tecnico: Prevalencia de Especies Invasoras**
-
-## 2. Resumo executivo
-Foram analisados {total} registos. A especie dominante e *{species}* e o municipio com mais registos e *{municipality}*.
-
-## 3. Limitações
-- Relatorio gerado automaticamente.
-- Pode existir enviesamento de amostragem.
-"""
+        return f"""## 1. Titulo\n**Relatorio Publico: Especies Invasoras**\n\n## 2. Resumo\nEste relatorio usa {total} registos. A especie mais observada foi *{species}* e o municipio com mais registos foi *{municipality}*.\n\n## 3. Limitações\n- Os dados podem ter falhas e lacunas.\n- O texto e apenas preliminar.\n"""
+    return f"""## 1. Titulo\n**Relatorio Tecnico: Prevalencia de Especies Invasoras**\n\n## 2. Resumo executivo\nForam analisados {total} registos. A especie dominante e *{species}* e o municipio com mais registos e *{municipality}*.\n\n## 3. Limitações\n- Relatorio gerado automaticamente.\n- Pode existir enviesamento de amostragem.\n"""
 
 
 def build_report_payload(level: str, species: str = None, municipality: str = None) -> dict:
@@ -232,10 +186,7 @@ def build_report_payload(level: str, species: str = None, municipality: str = No
         source = "Llama3.2_agent"
     except Exception as error:
         report = build_template_report(summary, level)
-        report = f"""{report}
-
-Motivo tecnico: {str(error)}
-""".strip()
+        report = f"""{report}\nMotivo tecnico: {str(error)}\n""".strip()
         source = "template_fallback"
     validation = validate_report_text(report, summary)
     return {
@@ -315,15 +266,8 @@ def build_pdf(report_text: str, level: str, summary: dict) -> bytes:
     buffer.seek(0)
     return buffer.read()
 
-
-# Garante que tens este endpoint no backend/main.py
-
 @app.post("/report-template")
 def get_report_template(level: str = "tecnico", species: str = None, municipality: str = None):
-    """
-    Gera um relatório estático com base num template predefinido (Fallback).
-    Não consome créditos da OpenAI.
-    """
     try:
         normalized_level = normalize_report_level(level)
         summary_data = get_summary(species=species, municipality=municipality)
@@ -340,7 +284,6 @@ def get_report_template(level: str = "tecnico", species: str = None, municipalit
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao gerar template: {str(e)}")
     
-
 @app.post("/report")
 def generate_report(level: str = "tecnico", species: str = None, municipality: str = None):
     normalized_level = normalize_report_level(level)
@@ -351,7 +294,6 @@ def generate_report(level: str = "tecnico", species: str = None, municipality: s
         "validation": payload["validation"],
         "level": payload["level"],
     }
-
 
 @app.get("/report/pdf")
 def export_report_pdf(level: str = "tecnico", species: str = None, municipality: str = None):
@@ -365,19 +307,9 @@ def export_report_pdf(level: str = "tecnico", species: str = None, municipality:
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
-
-# ============================================================================
-# ENDPOINTS DE RASTER - CAMADA 1: INVENTÁRIO E DESCOBERTA
-# ============================================================================
-
 @app.get("/raster/species")
 def get_raster_species():
-    """
-    Retorna lista de espécies disponíveis nos ficheiros raster.
-    Camada 1: Inventário e Descoberta.
-    """
     return {"species": get_raster_species_list()}
-
 
 @app.get("/raster/files")
 def get_raster_files_endpoint(
@@ -386,16 +318,6 @@ def get_raster_files_endpoint(
     scenario: str = None,
     binary: bool = None
 ):
-    """
-    Retorna ficheiros raster filtrados por critérios.
-    Camada 1: Inventário e Descoberta.
-    
-    Parâmetros:
-        - species: Nome científico (ex: "Ailanthus_altissima")
-        - period: "hist", "2041-2070", "2071-2100"
-        - scenario: "ssp126", "ssp370", "ssp585"
-        - binary: true/false para binários/contínuos
-    """
     files = get_raster_files(
         species=species,
         period=period,
@@ -407,42 +329,18 @@ def get_raster_files_endpoint(
         "files": [Path(f).name for f in files],
     }
 
-
 @app.get("/raster/parse/{filename}")
 def parse_raster_filename_endpoint(filename: str):
-    """
-    Extrai metadados do nome de um ficheiro raster.
-    Camada 1: Inventário e Descoberta.
-    """
     result = parse_raster_filename(filename)
     if result is None:
         raise HTTPException(status_code=400, detail="Nome de ficheiro inválido")
     return result
 
-
-# ============================================================================
-# ENDPOINTS DE RASTER - CAMADA 2: SÍNTESE ESTATÍSTICA
-# ============================================================================
-
 @app.get("/raster/stats/{species}")
-def get_raster_stats_endpoint(
-    species: str,
-    period: str = "hist",
-    scenario: str = None
-):
-    """
-    Retorna estatísticas básicas de um raster de espécie.
-    Camada 2: Síntese Estatística.
-    
-    Parâmetros:
-        - species: Nome científico
-        - period: Período temporal
-        - scenario: Cenário climático (se aplicável)
-    """
+def get_raster_stats_endpoint(species: str, period: str = "hist", scenario: str = None):
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
     if not files:
         raise HTTPException(status_code=404, detail=f"Nenhum raster encontrado para {species}")
-    
     return {
         "species": species,
         "period": period,
@@ -450,22 +348,11 @@ def get_raster_stats_endpoint(
         "stats": get_raster_stats(files[0]),
     }
 
-
 @app.get("/raster/suitable-area/{species}")
-def get_suitable_area(
-    species: str,
-    period: str = "hist",
-    scenario: str = None,
-    threshold: float = 0.5
-):
-    """
-    Calcula a área adequada de uma espécie.
-    Camada 2: Síntese Estatística.
-    """
+def get_suitable_area(species: str, period: str = "hist", scenario: str = None, threshold: float = 0.5):
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
     if not files:
         raise HTTPException(status_code=404, detail=f"Nenhum raster encontrado para {species}")
-    
     return {
         "species": species,
         "period": period,
@@ -474,79 +361,25 @@ def get_suitable_area(
         "data": compute_suitable_area(files[0], threshold=threshold),
     }
 
-
 @app.get("/raster/compare-periods/{species}")
-def compare_periods_endpoint(
-    species: str,
-    scenario: str = "ssp370"
-):
-    """
-    Compara área adequada entre períodos (hist, 2041-2070, 2071-2100).
-    Camada 2: Síntese Estatística.
-    """
+def compare_periods_endpoint(species: str, scenario: str = "ssp370"):
     return compare_periods(species=species, scenario=scenario)
 
-
-# ============================================================================
-# ENDPOINTS DE RASTER - CAMADA 3: SOBREPOSIÇÃO ESPACIAL
-# ============================================================================
-
 @app.get("/raster/overlap")
-def get_overlap(
-    species1: str,
-    species2: str,
-    period: str = "hist",
-    operation: str = "intersection"
-):
-    """
-    Calcula sobreposição entre dois rasters de espécies.
-    Camada 3: Sobreposição Espacial.
-    
-    Parâmetros:
-        - species1, species2: Nomes de espécies
-        - period: Período temporal
-        - operation: "intersection", "union", "difference"
-    """
+def get_overlap(species1: str, species2: str, period: str = "hist", operation: str = "intersection"):
     if operation not in ["intersection", "union", "difference"]:
         raise HTTPException(status_code=400, detail="Operação inválida")
-    
-    return overlap_two_species(
-        species1=species1,
-        species2=species2,
-        period=period,
-        operation=operation
-    )
-
-
-# ============================================================================
-# ENDPOINTS DE RASTER - CAMADA 4: COMPARAÇÃO DE CENÁRIOS
-# ============================================================================
+    return overlap_two_species(species1=species1, species2=species2, period=period, operation=operation)
 
 @app.get("/raster/scenarios/{species}")
 def get_scenarios(species: str):
-    """
-    Gera matriz período × cenário com áreas adequadas.
-    Camada 4: Comparação de Cenários.
-    
-    Retorna análise completa de expansão sob diferentes cenários climáticos.
-    """
     return scenario_matrix(species=species)
-
-
-# ============================================================================
-# ENDPOINT ESPECIAL: AGENTE COM DADOS RASTER
-# ============================================================================
 
 @app.get("/raster/summary/{species}")
 def get_raster_summary(species: str):
-    """
-    Resumo completo de uma espécie com todos os dados raster disponíveis.
-    Combina todas as camadas para análise do agente.
-    """
     species_list = get_raster_species_list()
     if species not in species_list:
         raise HTTPException(status_code=404, detail=f"Espécie não encontrada: {species}")
-    
     return {
         "species": species,
         "available_periods": {
@@ -557,3 +390,33 @@ def get_raster_summary(species: str):
         "scenario_analysis": scenario_matrix(species=species),
         "temporal_comparison": compare_periods(species=species),
     }
+
+@app.get("/raster/bounds/{species}")
+def get_raster_bounds_endpoint(species: str, period: str = "hist"):
+    files = get_raster_files(species=species, period=period, binary=True)
+    if not files:
+        raise HTTPException(status_code=404, detail=f"Raster não encontrado: {species}/{period}")
+    bounds_data = get_raster_bounds(files[0])
+    if "error" in bounds_data:
+        raise HTTPException(status_code=500, detail=bounds_data["error"])
+    return bounds_data
+
+@app.get("/raster/legend/{species}")
+def get_raster_legend_endpoint(species: str, period: str = "hist"):
+    files = get_raster_files(species=species, period=period, binary=True)
+    if not files:
+        raise HTTPException(status_code=404, detail=f"Raster não encontrado: {species}/{period}")
+    legend_data = get_raster_legend(files[0])
+    if "error" in legend_data:
+        raise HTTPException(status_code=500, detail=legend_data["error"])
+    return legend_data
+
+@app.get("/raster/data/{species}")
+def get_raster_data_endpoint(species: str, period: str = "hist", max_samples: int = 1000):
+    files = get_raster_files(species=species, period=period, binary=True)
+    if not files:
+        raise HTTPException(status_code=404, detail=f"Raster não encontrado: {species}/{period}")
+    data = get_raster_data_samples(files[0], max_samples=max_samples)
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=data["error"])
+    return data

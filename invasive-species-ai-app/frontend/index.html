@@ -4,147 +4,123 @@
     <meta charset="UTF-8" />
     <title>Espécies Invasoras — Protótipo</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- 1º OBRIGATÓRIO: Leaflet -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- 2º OBRIGATÓRIO: Proj4 -->
+    <script src="https://unpkg.com/proj4"></script>
+
+    <!-- 2.5º CONFIGURAÇÃO DO PROJ4 -->
+    <script>
+      // Garantir que está global
+      window.proj4 = proj4;
+      
+      // EPSG:3035 (A projeção usada na Europa para grelhas estatísticas)
+      const proj3035 = "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs";
+      proj4.defs("EPSG:3035", proj3035);
+      proj4.defs("3035", proj3035); 
+
+      // EPSG:6933 (Projeção Global Equal-Area - A TUA PROJEÇÃO REAL)
+      const proj6933 = "+proj=cea +lon_0=0 +lat_ts=30 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs";
+      proj4.defs("EPSG:6933", proj6933);
+      proj4.defs("6933", proj6933);
+    </script>
+
+    <!-- 3º GeoRaster e o Plugin -->
+    <script src="https://unpkg.com/georaster"></script>
+    <script src="https://unpkg.com/georaster-layer-for-leaflet"></script>
+    
+    <!-- Gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    
     <style>
-      body {
-        margin: 0;
-        font-family: Arial, sans-serif;
-        display: grid;
-        grid-template-columns: 360px 1fr;
-        height: 100vh;
-      }
-      aside {
-        padding: 16px;
-        background: #f4f6f4;
-        border-right: 1px solid #d0d0d0;
-        overflow-y: auto;
-      }
-      h1 {
-        font-size: 22px;
-        margin-top: 0;
-      }
-      label {
-        font-weight: bold;
-        display: block;
-        margin-top: 12px;
-      }
-      select,
-      button {
-        width: 100%;
-        padding: 8px;
-        margin-top: 6px;
-        margin-bottom: 10px;
-        box-sizing: border-box;
-      }
-      button {
-        cursor: pointer;
-        border: none;
-        background: #2d6a4f;
-        color: white;
-        font-weight: bold;
-        border-radius: 4px;
-      }
-      button:hover {
-        background: #1b4332;
-      }
-      button:disabled {
-        background: #a0a0a0;
-        cursor: not-allowed;
-        opacity: 0.6;
-      }
-      button:disabled:hover {
-        background: #a0a0a0;
-      }
-      #map {
-        height: 100vh;
-      }
-      .metric {
-        background: white;
-        padding: 10px;
-        margin-bottom: 8px;
-        border-radius: 6px;
-        border: 1px solid #ddd;
-      }
-      pre {
-        background: white;
-        border: 1px solid #ddd;
-        padding: 12px;
-        white-space: pre-wrap;
-        border-radius: 6px;
-      }
-      .chart-card {
-        background: white;
-        padding: 10px;
-        margin-bottom: 12px;
-        border-radius: 6px;
-        border: 1px solid #ddd;
-      }
-      .chart-card h3 {
-        margin: 6px 0 10px;
-        font-size: 14px;
-      }
-      .report-actions {
-        display: grid;
-        gap: 8px;
-      }
-      .pdf-button {
-        width: auto;
-        padding: 6px 12px;
-        margin-top: 8px;
-        margin-bottom: 12px;
-        font-size: 12px;
-        font-weight: bold;
-      }
+      body { margin: 0; font-family: Arial, sans-serif; display: grid; grid-template-columns: 360px 1fr; height: 100vh; }
+      aside { padding: 16px; background: #f4f6f4; border-right: 1px solid #d0d0d0; overflow-y: auto; }
+      h1 { font-size: 22px; margin-top: 0; }
+      h2 { font-size: 16px; margin-top: 16px; margin-bottom: 8px; }
+      label { font-weight: bold; display: block; margin-top: 12px; }
+      select, button { width: 100%; padding: 8px; margin-top: 6px; margin-bottom: 10px; box-sizing: border-box; }
+      button { cursor: pointer; border: none; background: #2d6a4f; color: white; font-weight: bold; border-radius: 4px; }
+      button:hover { background: #1b4332; }
+      button:disabled { background: #a0a0a0; cursor: not-allowed; opacity: 0.6; }
+      button.toggle-active { background: #1b4332; }
+      #map { height: 100vh; }
+      .metric { background: white; padding: 10px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #ddd; }
+      pre { background: white; border: 1px solid #ddd; padding: 12px; white-space: pre-wrap; border-radius: 6px; }
+      .chart-card { background: white; padding: 10px; margin-bottom: 12px; border-radius: 6px; border: 1px solid #ddd; }
+      .chart-card h3 { margin: 6px 0 10px; font-size: 14px; }
+      .report-actions { display: grid; gap: 8px; }
+      .pdf-button { width: auto; padding: 6px 12px; margin-top: 8px; margin-bottom: 12px; font-size: 12px; font-weight: bold; }
+      .raster-controls { background: white; padding: 12px; border-radius: 6px; border: 1px solid #ddd; margin-bottom: 10px; }
+      .period-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .period-buttons button { padding: 6px; font-size: 12px; margin: 0; }
+      .raster-info { background: #e8f5e9; padding: 8px; border-radius: 4px; margin-bottom: 10px; font-size: 12px; color: #2d6a4f; }
+      .period-control { background: white; padding: 8px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); display: flex; gap: 4px; }
+      .period-control button { width: auto; padding: 6px 12px; margin: 0; font-size: 11px; border: 1px solid #ccc; background: white; color: #333; cursor: pointer; border-radius: 3px; transition: background 0.2s; }
+      .period-control button:hover { background: #f0f0f0; }
+      .period-control button.active { background: #2d6a4f !important; color: white; border-color: #2d6a4f; }
     </style>
   </head>
   <body>
     <aside>
       <h1>Espécies Invasoras</h1>
       <p>Protótipo para visualização, indicadores e relatório automático.</p>
+      
       <label for="speciesFilter">Filtrar por espécie</label>
       <select id="speciesFilter">
         <option value="">Todas as espécies</option>
       </select>
+      
       <label for="municipalityFilter">Filtrar por munícípio</label>
       <select id="municipalityFilter">
         <option value="">Todos os municípios</option>
       </select>
+
+      <!-- Controles de Rasters -->
+      <div id="rasterControls" class="raster-controls" hidden>
+        <h3 style="margin-top: 0">Dados Raster</h3>
+        <div id="rasterInfo" class="raster-info"></div>
+      </div>
+
       <label for="reportLevel">Nível do relatório</label>
       <select id="reportLevel">
         <option value="tecnico">Técnico</option>
         <option value="executivo">Executivo</option>
         <option value="publico">Público geral</option>
       </select>
+      
       <h2>Indicadores</h2>
       <div id="summary">A carregar indicadores...</div>
       <div id="chartsPanel" hidden></div>
+      
       <div class="report-actions">
         <button id="templateButton">Gerar relatório por template</button>
         <button id="reportButton">Gerar relatório com IA</button>
       </div>
+      
       <h2>Relatório</h2>
-      <button id="pdfButton" class="pdf-button" disabled>
-        Converter para PDF
-      </button>
+      <button id="pdfButton" class="pdf-button" disabled>Converter para PDF</button>
       <pre id="report">O relatório será apresentado aqui.</pre>
     </aside>
     <div id="map"></div>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
     <script>
       const API_URL = "http://localhost:8000";
-      const map = L.map("map").setView([41.1579, -8.6291], 11);
+      const map = L.map("map").setView([39.3999, -8.2245], 6);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "© OpenStreetMap contributors",
       }).addTo(map);
+
       let records = [];
       let markers = [];
-      let speciesChart;
-      let municipalityChart;
-      let speciesDistributionChart;
+      let speciesChart, municipalityChart, speciesDistributionChart;
+      let currentRasterLayer = null;
+      let currentPeriod = "hist"; 
+      
+      // NOVA VARIÁVEL GLOBAL PARA EVITAR A SOBREPOSIÇÃO DE RASTERS
+      let currentRasterFetchId = 0;
 
       async function loadRecords() {
         const response = await fetch(`${API_URL}/records`);
@@ -176,38 +152,147 @@
         });
       }
 
+      // =====================================================
+      // RENDERIZAÇÃO DE RASTERS (georaster-layer-for-leaflet)
+      // =====================================================
+
+      async function showRasterLayer(species) {
+        const rasterControls = document.getElementById("rasterControls");
+
+        try {
+          const encodedSpecies = encodeURIComponent(species);
+          const url = `${API_URL}/raster/files?species=${encodedSpecies}&period=${currentPeriod}&binary=true`;
+          let response = await fetch(url);
+          let data = await response.json();
+          
+          if (!data.files || data.files.length === 0) {
+            rasterControls.hidden = true;
+            if (currentRasterLayer) {
+                map.removeLayer(currentRasterLayer);
+                currentRasterLayer = null;
+            }
+            return;
+          }
+
+          rasterControls.hidden = false;
+          const filename = data.files[0];
+          const tiffUrl = `${API_URL}/rasters_data/${filename}`;
+
+          // REGISTAMOS UMA NOVA CHAMADA (ID único para este download)
+          currentRasterFetchId++;
+          const myFetchId = currentRasterFetchId;
+
+          fetch(tiffUrl)
+            .then(response => response.arrayBuffer())
+            .then(arrayBuffer => parseGeoraster(arrayBuffer))
+            .then(georaster => {
+              
+              // === VERIFICAÇÃO DE "RACE CONDITION" ===
+              // Se o ID deste download não for igual ao ID global, 
+              // significa que o utilizador já escolheu outra espécie entretanto.
+              // Portanto, abortamos o desenho deste mapa antigo!
+              if (currentRasterFetchId !== myFetchId) return;
+
+              // Só apagamos a camada antiga AGORA, quando a nova já está pronta para entrar
+              if (currentRasterLayer) {
+                map.removeLayer(currentRasterLayer);
+              }
+
+              georaster.projection = 6933; 
+
+              currentRasterLayer = new GeoRasterLayer({
+                georaster: georaster,
+                opacity: 0.7,
+                resolution: 256,
+                pixelValuesToColorFn: function(values) {
+                  const val = values[0];
+                  if (val === georaster.noDataValue || isNaN(val) || val < 0.5) {
+                    return null; 
+                  }
+                  return '#111111'; 
+                }
+              });
+              
+              currentRasterLayer.addTo(map);
+              map.fitBounds(currentRasterLayer.getBounds());
+            });
+
+          const statsResponse = await fetch(`${API_URL}/raster/stats/${encodedSpecies}?period=${currentPeriod}`);
+          if(statsResponse.ok) {
+            const rasterStats = await statsResponse.json();
+            const info = document.getElementById("rasterInfo");
+            info.innerHTML = `
+              <strong>${species}</strong><br>
+              Período: ${currentPeriod === "hist" ? "Histórico" : "Futuro"}<br>
+              Píxeis ativos: ${rasterStats.stats.count}
+            `;
+          }
+        } catch (error) {
+          console.error("Erro ao desenhar Raster:", error);
+          rasterControls.hidden = true;
+        }
+      }
+
+      function setupRasterControls() {
+        const PeriodControl = L.Control.extend({
+          options: { position: "topright" },
+          onAdd: function (map) {
+            const container = L.DomUtil.create("div", "period-control");
+            const btnHistorical = L.DomUtil.create("button", "btn-historical active");
+            btnHistorical.innerHTML = " Histórico";
+            
+            const btnFuture = L.DomUtil.create("button", "btn-future");
+            btnFuture.innerHTML = " Futuro";
+
+            container.appendChild(btnHistorical);
+            container.appendChild(btnFuture);
+
+            btnHistorical.addEventListener("click", async (e) => {
+              e.preventDefault();
+              currentPeriod = "hist";
+              btnHistorical.classList.add("active");
+              btnFuture.classList.remove("active");
+              const selectedSpecies = document.getElementById("speciesFilter").value;
+              if (selectedSpecies) await showRasterLayer(selectedSpecies);
+            });
+
+            btnFuture.addEventListener("click", async (e) => {
+              e.preventDefault();
+              currentPeriod = "2041-2070";
+              btnFuture.classList.add("active");
+              btnHistorical.classList.remove("active");
+              const selectedSpecies = document.getElementById("speciesFilter").value;
+              if (selectedSpecies) await showRasterLayer(selectedSpecies);
+            });
+
+            L.DomEvent.disableClickPropagation(container);
+            return container;
+          },
+        });
+        new PeriodControl().addTo(map);
+      }
+
+      // =====================================================
+      // RESTO DAS FUNÇÕES GERAIS
+      // =====================================================
+
       async function loadSummary() {
         const response = await fetch(`${API_URL}/summary`);
         const summary = await response.json();
-
-        // Construir as linhas de distribuição de espécies se existirem nos dados [cite: 615, 616]
-        let speciesLines = "";
-        if (summary.species_count && summary.species_percentages) {
-          speciesLines = Object.entries(summary.species_count)
-            .map(
-              ([species, count]) =>
-                `<li>${species}: ${count} registos (${summary.species_percentages[species]}%)</li>`,
-            )
-            .join("");
-        }
-
-        // Construir as linhas de hotspots se existirem [cite: 618, 619]
+        
         let hotspotLines = "<li>Nenhum hotspot definido.</li>";
         if (summary.hotspots && summary.hotspots.length > 0) {
-          hotspotLines = summary.hotspots
-            .map((h) => `<li>${h.municipality}: ${h.records} registos</li>`)
-            .join("");
+          hotspotLines = summary.hotspots.map((h) => `<li>${h.municipality}: ${h.records} registos</li>`).join("");
         }
 
         document.getElementById("summary").innerHTML = `
-<div class="metric"><strong>Total de registos:</strong><br>${summary.total_records}</div>
-<div class="metric"><strong>Espécie dominante:</strong><br>${summary.most_common_species}</div>
-<div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}</div>
-${summary.hotspots ? `<h3>Hotspots simples</h3><ul>${hotspotLines}</ul>` : ""}
-<h3>Distribuição por espécie</h3>
-<canvas id="speciesDistributionChart" style="max-height: 200px;"></canvas>
-`;
-
+          <div class="metric"><strong>Total de registos:</strong><br>${summary.total_records}</div>
+          <div class="metric"><strong>Espécie dominante:</strong><br>${summary.most_common_species}</div>
+          <div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}</div>
+          ${summary.hotspots ? `<h3>Hotspots simples</h3><ul>${hotspotLines}</ul>` : ""}
+          <h3>Distribuição por espécie</h3>
+          <canvas id="speciesDistributionChart" style="max-height: 200px;"></canvas>
+        `;
         renderCharts(summary);
       }
 
@@ -216,107 +301,41 @@ ${summary.hotspots ? `<h3>Hotspots simples</h3><ul>${hotspotLines}</ul>` : ""}
         if (!chartPanel.hasChildNodes()) {
           chartPanel.hidden = false;
           chartPanel.innerHTML = `
-<div class="chart-card">
-<h3>Registos por espécie</h3>
-<canvas id="speciesChart"></canvas>
-</div>
-<div class="chart-card">
-<h3>Registos por município</h3>
-<canvas id="municipalityChart"></canvas>
-</div>
-`;
+            <div class="chart-card"><h3>Registos por espécie</h3><canvas id="speciesChart"></canvas></div>
+            <div class="chart-card"><h3>Registos por município</h3><canvas id="municipalityChart"></canvas></div>
+          `;
         }
 
         const speciesData = summary.species_count || {};
         const municipalityData = summary.municipality_count || {};
-
         const speciesLabels = Object.keys(speciesData);
         const speciesValues = Object.values(speciesData);
         const municipalityLabels = Object.keys(municipalityData);
         const municipalityValues = Object.values(municipalityData);
 
-        const speciesCtx = document.getElementById("speciesChart");
-        const municipalityCtx = document.getElementById("municipalityChart");
-        const speciesDistributionCtx = document.getElementById(
-          "speciesDistributionChart",
-        );
+        if (speciesChart) speciesChart.destroy();
+        if (municipalityChart) municipalityChart.destroy();
+        if (speciesDistributionChart) speciesDistributionChart.destroy();
 
-        if (speciesChart) {
-          speciesChart.destroy();
-        }
-        if (municipalityChart) {
-          municipalityChart.destroy();
-        }
-        if (speciesDistributionChart) {
-          speciesDistributionChart.destroy();
-        }
-
-        speciesChart = new Chart(speciesCtx, {
+        speciesChart = new Chart(document.getElementById("speciesChart"), {
           type: "bar",
-          data: {
-            labels: speciesLabels,
-            datasets: [
-              {
-                label: "Registos",
-                data: speciesValues,
-                backgroundColor: "#2d6a4f",
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
-          },
+          data: { labels: speciesLabels, datasets: [{ label: "Registos", data: speciesValues, backgroundColor: "#2d6a4f" }] },
+          options: { responsive: true, plugins: { legend: { display: false } } },
         });
 
-        municipalityChart = new Chart(municipalityCtx, {
+        municipalityChart = new Chart(document.getElementById("municipalityChart"), {
           type: "bar",
-          data: {
-            labels: municipalityLabels,
-            datasets: [
-              {
-                label: "Registos",
-                data: municipalityValues,
-                backgroundColor: "#1b4332",
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
-          },
+          data: { labels: municipalityLabels, datasets: [{ label: "Registos", data: municipalityValues, backgroundColor: "#1b4332" }] },
+          options: { responsive: true, plugins: { legend: { display: false } } },
         });
 
-        // Gráfico de pizza para distribuição de espécies
-        speciesDistributionChart = new Chart(speciesDistributionCtx, {
+        speciesDistributionChart = new Chart(document.getElementById("speciesDistributionChart"), {
           type: "doughnut",
           data: {
             labels: speciesLabels,
-            datasets: [
-              {
-                label: "Registos",
-                data: speciesValues,
-                backgroundColor: [
-                  "#2d6a4f",
-                  "#1b4332",
-                  "#40916c",
-                  "#52b788",
-                  "#74c69d",
-                  "#b7e4c7",
-                  "#d8f3dc",
-                  "#95d5b2",
-                ],
-                borderColor: "#f4f6f4",
-                borderWidth: 2,
-              },
-            ],
+            datasets: [{ label: "Registos", data: speciesValues, backgroundColor: ["#2d6a4f", "#1b4332", "#40916c", "#52b788", "#74c69d", "#b7e4c7", "#d8f3dc"], borderWidth: 2 }]
           },
-          options: {
-            responsive: true,
-            plugins: {
-              legend: { position: "bottom", labels: { padding: 10 } },
-            },
-          },
+          options: { responsive: true, plugins: { legend: { position: "bottom" } } },
         });
       }
 
@@ -324,117 +343,83 @@ ${summary.hotspots ? `<h3>Hotspots simples</h3><ul>${hotspotLines}</ul>` : ""}
         markers.forEach((marker) => marker.remove());
         markers = [];
         data.forEach((record) => {
-          const marker = L.marker([record.latitude, record.longitude]).addTo(
-            map,
-          ).bindPopup(`
-<strong>${record.species}</strong><br>
-Município: ${record.municipality}<br>
-Data: ${record.date}<br>
-Fonte: ${record.source}
-`);
+          const marker = L.marker([record.latitude, record.longitude]).addTo(map)
+            .bindPopup(`<strong>${record.species}</strong><br>Município: ${record.municipality}<br>Data: ${record.date}<br>Fonte: ${record.source}`);
           markers.push(marker);
         });
       }
 
-      function filterBySpecies() {
+      async function filterBySpecies() {
         const selectedSpecies = document.getElementById("speciesFilter").value;
-        const selectedMunicipality =
-          document.getElementById("municipalityFilter").value;
+        const selectedMunicipality = document.getElementById("municipalityFilter").value;
         const filteredRecords = records.filter((record) => {
-          const speciesMatch =
-            !selectedSpecies || record.species === selectedSpecies;
-          const municipalityMatch =
-            !selectedMunicipality ||
-            record.municipality === selectedMunicipality;
+          const speciesMatch = !selectedSpecies || record.species === selectedSpecies;
+          const municipalityMatch = !selectedMunicipality || record.municipality === selectedMunicipality;
           return speciesMatch && municipalityMatch;
         });
         showMarkers(filteredRecords);
+
+        if (selectedSpecies) {
+          await showRasterLayer(selectedSpecies);
+        } else {
+          // Utilizador selecionou "Todas as Espécies", abortamos qualquer download!
+          currentRasterFetchId++; 
+          if (currentRasterLayer) {
+            map.removeLayer(currentRasterLayer);
+            currentRasterLayer = null;
+          }
+          document.getElementById("rasterControls").hidden = true;
+        }
       }
 
-      function filterByMunicipality() {
-        filterBySpecies();
-      }
+      function filterByMunicipality() { filterBySpecies(); }
 
       async function generateTemplateReport() {
-        document.getElementById("report").textContent =
-          "A gerar relatório por template...";
+        document.getElementById("report").textContent = "A gerar relatório por template...";
         const level = document.getElementById("reportLevel").value;
         const selectedSpecies = document.getElementById("speciesFilter").value;
-        const selectedMunicipality =
-          document.getElementById("municipalityFilter").value;
+        const selectedMunicipality = document.getElementById("municipalityFilter").value;
         const params = new URLSearchParams({ level });
-        if (selectedSpecies) {
-          params.append("species", selectedSpecies);
-        }
-        if (selectedMunicipality) {
-          params.append("municipality", selectedMunicipality);
-        }
-        const response = await fetch(
-          `${API_URL}/report-template?${params.toString()}`,
-          {
-            method: "POST",
-          },
-        );
+        if (selectedSpecies) params.append("species", selectedSpecies);
+        if (selectedMunicipality) params.append("municipality", selectedMunicipality);
+        const response = await fetch(`${API_URL}/report-template?${params.toString()}`, { method: "POST" });
         const data = await response.json();
         document.getElementById("report").textContent = data.report;
         document.getElementById("pdfButton").disabled = false;
       }
 
       async function generateAIReport() {
-        document.getElementById("report").textContent =
-          "A gerar relatório com IA...";
+        document.getElementById("report").textContent = "A gerar relatório com IA...";
         const level = document.getElementById("reportLevel").value;
         const selectedSpecies = document.getElementById("speciesFilter").value;
-        const selectedMunicipality =
-          document.getElementById("municipalityFilter").value;
+        const selectedMunicipality = document.getElementById("municipalityFilter").value;
         const params = new URLSearchParams({ level });
-        if (selectedSpecies) {
-          params.append("species", selectedSpecies);
-        }
-        if (selectedMunicipality) {
-          params.append("municipality", selectedMunicipality);
-        }
-        const response = await fetch(`${API_URL}/report?${params.toString()}`, {
-          method: "POST",
-        });
+        if (selectedSpecies) params.append("species", selectedSpecies);
+        if (selectedMunicipality) params.append("municipality", selectedMunicipality);
+        const response = await fetch(`${API_URL}/report?${params.toString()}`, { method: "POST" });
         const data = await response.json();
-        const validationText = data.validation
-          ? `\n\nValidação automática:\n${JSON.stringify(data.validation, null, 2)}`
-          : "";
-        document.getElementById("report").textContent =
-          `[Fonte: ${data.source} | Nivel: ${data.level}]\n\n${data.report}${validationText}`;
+        const validationText = data.validation ? `\n\nValidação automática:\n${JSON.stringify(data.validation, null, 2)}` : "";
+        document.getElementById("report").textContent = `[Fonte: ${data.source} | Nivel: ${data.level}]\n\n${data.report}${validationText}`;
         document.getElementById("pdfButton").disabled = false;
       }
 
       function exportPdf() {
         const level = document.getElementById("reportLevel").value;
         const selectedSpecies = document.getElementById("speciesFilter").value;
-        const selectedMunicipality =
-          document.getElementById("municipalityFilter").value;
+        const selectedMunicipality = document.getElementById("municipalityFilter").value;
         const params = new URLSearchParams({ level });
-        if (selectedSpecies) {
-          params.append("species", selectedSpecies);
-        }
-        if (selectedMunicipality) {
-          params.append("municipality", selectedMunicipality);
-        }
+        if (selectedSpecies) params.append("species", selectedSpecies);
+        if (selectedMunicipality) params.append("municipality", selectedMunicipality);
         window.open(`${API_URL}/report/pdf?${params.toString()}`, "_blank");
       }
 
-      document
-        .getElementById("speciesFilter")
-        .addEventListener("change", filterBySpecies);
-      document
-        .getElementById("municipalityFilter")
-        .addEventListener("change", filterByMunicipality);
-      document
-        .getElementById("templateButton")
-        .addEventListener("click", generateTemplateReport);
-      document
-        .getElementById("reportButton")
-        .addEventListener("click", generateAIReport);
+      document.getElementById("speciesFilter").addEventListener("change", filterBySpecies);
+      document.getElementById("municipalityFilter").addEventListener("change", filterByMunicipality);
+      document.getElementById("templateButton").addEventListener("click", generateTemplateReport);
+      document.getElementById("reportButton").addEventListener("click", generateAIReport);
       document.getElementById("pdfButton").addEventListener("click", exportPdf);
 
+      setupRasterControls();
       loadRecords();
       loadSpecies();
       loadMunicipalities();

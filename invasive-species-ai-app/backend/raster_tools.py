@@ -408,3 +408,232 @@ def _summarize_matrix(matrix: dict) -> dict:
         "max_area_km2": round(max(values), 2),
         "avg_area_km2": round(np.mean(values), 2),
     }
+
+
+# ============================================================================
+# CAMADA 5 - SERVIR RASTERS NA WEB (LEAFLET)
+# ============================================================================
+
+def get_raster_bounds(filepath: str) -> dict:
+    """
+    Obtém os bounds (limites) de um raster em coordenadas geográficas (EPSG:4326).
+    
+    Útil para Leaflet imageBounds e zoom automático.
+    
+    Args:
+        filepath: Caminho para o ficheiro .tif
+    
+    Returns:
+        dict com bounds [[south, west], [north, east]] e meta informações
+    """
+    filepath = str(filepath)
+    if not Path(filepath).exists():
+        return {"error": f"Ficheiro não encontrado: {filepath}"}
+    
+    try:
+        with rasterio.open(filepath) as src:
+            crs = src.crs
+            bounds = src.bounds  # (left, bottom, right, top)
+            
+            # Se CRS é geográfico, usar direto
+            if crs.to_epsg() == 4326:
+                return {
+                    "bounds": [[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
+                    "crs": 4326,
+                    "width": src.width,
+                    "height": src.height,
+                }
+            
+            # Converter para EPSG:4326 se for CRS projetado
+            transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+            
+            # Converter 4 cantos do bounds
+            corners = [
+                (bounds.left, bounds.bottom),   # SW
+                (bounds.right, bounds.bottom),  # SE
+                (bounds.left, bounds.top),      # NW
+                (bounds.right, bounds.top),     # NE
+            ]
+            
+            lons = []
+            lats = []
+            for lon, lat in corners:
+                lon_wgs, lat_wgs = transformer.transform(lon, lat)
+                lons.append(lon_wgs)
+                lats.append(lat_wgs)
+            
+            return {
+                "bounds": [[min(lats), min(lons)], [max(lats), max(lons)]],
+                "crs_origin": crs.to_epsg(),
+                "crs_target": 4326,
+                "width": src.width,
+                "height": src.height,
+            }
+    
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_raster_data_samples(filepath: str, max_samples: int = 1000) -> dict:
+    """
+    Extrai amostras de dados do raster para visualização e análise.
+    
+    Retorna:
+    - Distribuição de valores
+    - Amostra de pontos com coordenadas e valores
+    - Estatísticas
+    
+    Args:
+        filepath: Caminho para o ficheiro .tif
+        max_samples: Número máximo de amostras a extrair
+    
+    Returns:
+        dict com amostras de dados
+    """
+    filepath = str(filepath)
+    if not Path(filepath).exists():
+        return {"error": f"Ficheiro não encontrado: {filepath}"}
+    
+    try:
+        with rasterio.open(filepath) as src:
+            data = src.read(1)
+            nodata = src.nodata
+            crs = src.crs
+            transform = src.transform
+            
+            # Máscara de valores válidos
+            if nodata is not None:
+                valid_mask = data != nodata
+            else:
+                valid_mask = np.ones(data.shape, dtype=bool)
+            
+            valid_data = data[valid_mask]
+            
+            # Estatísticas básicas
+            stats = {
+                "min": float(np.min(valid_data)),
+                "max": float(np.max(valid_data)),
+                "mean": float(np.mean(valid_data)),
+                "median": float(np.median(valid_data)),
+                "std": float(np.std(valid_data)),
+                "count": int(np.sum(valid_mask)),
+            }
+            
+            # Amostrar pontos aleatoriamente
+            valid_coords = np.argwhere(valid_mask)
+            if len(valid_coords) > max_samples:
+                indices = np.random.choice(len(valid_coords), max_samples, replace=False)
+                sample_coords = valid_coords[indices]
+            else:
+                sample_coords = valid_coords
+            
+            # Converter para lat/lon
+            samples = []
+            for row, col in sample_coords:
+                lon, lat = src.xy(row, col)
+                val = data[row, col]
+                
+                # Converter para EPSG:4326 se necessário
+                if crs and crs.to_epsg() != 4326:
+                    transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+                    lon, lat = transformer.transform(lon, lat)
+                
+                samples.append({
+                    "lat": float(lat),
+                    "lon": float(lon),
+                    "value": float(val),
+                })
+            
+            # Histograma de valores
+            hist, bin_edges = np.histogram(valid_data, bins=20)
+            
+            return {
+                "statistics": stats,
+                "histogram": {
+                    "counts": hist.tolist(),
+                    "bins": bin_edges.tolist(),
+                },
+                "samples": samples,
+                "total_samples": len(samples),
+                "crs": crs.to_epsg() if crs else None,
+            }
+    
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def get_raster_legend(filepath: str) -> dict:
+    """
+    Gera legenda e informações de coloração para o raster.
+    
+    Returns:
+        dict com paleta de cores e intervalos para Leaflet
+    """
+    filepath = str(filepath)
+    if not Path(filepath).exists():
+        return {"error": f"Ficheiro não encontrado: {filepath}"}
+    
+    try:
+        with rasterio.open(filepath) as src:
+            data = src.read(1)
+            nodata = src.nodata
+            
+            # Máscara de valores válidos
+            if nodata is not None:
+                valid_mask = data != nodata
+            else:
+                valid_mask = np.ones(data.shape, dtype=bool)
+            
+            valid_data = data[valid_mask]
+            
+            # Detectar se é binário
+            unique_vals = np.unique(valid_data)
+            is_binary = set(unique_vals.tolist()).issubset({0, 1})
+            
+            min_val = float(np.min(valid_data))
+            max_val = float(np.max(valid_data))
+            
+            if is_binary:
+                # Legenda simples para binário
+                return {
+                    "type": "binary",
+                    "classes": [
+                        {"value": 0, "label": "Não adequado", "color": "#ffffff"},
+                        {"value": 1, "label": "Adequado", "color": "#2d6a4f"},
+                    ],
+                }
+            else:
+                # Legenda contínua com gradiente
+                # Usar cores do verde claro (0) ao verde escuro (1)
+                colors = [
+                    "#f7fcfd",  # branco-azulado (0.0)
+                    "#e5f5f9",
+                    "#ccecf0",
+                    "#99d8c9",
+                    "#66c2a5",
+                    "#41ae76",
+                    "#238b45",
+                    "#2d6a4f",  # verde escuro (1.0)
+                ]
+                
+                n_classes = len(colors)
+                breaks = np.linspace(min_val, max_val, n_classes + 1)
+                
+                classes = []
+                for i, color in enumerate(colors):
+                    classes.append({
+                        "min": float(breaks[i]),
+                        "max": float(breaks[i + 1]),
+                        "color": color,
+                        "label": f"{breaks[i]:.2f} - {breaks[i+1]:.2f}",
+                    })
+                
+                return {
+                    "type": "continuous",
+                    "min": min_val,
+                    "max": max_val,
+                    "classes": classes,
+                }
+    
+    except Exception as e:
+        return {"error": str(e)}

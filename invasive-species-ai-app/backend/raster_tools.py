@@ -103,7 +103,7 @@ def parse_raster_filename(filename: str) -> dict:
     
     return {
         "filename": filename,
-        "species": species,
+        "species": species.replace("_", " "),
         "gbif_id": int(gbif_id),
         "period": period,
         "scenario": scenario,  # None se histórico

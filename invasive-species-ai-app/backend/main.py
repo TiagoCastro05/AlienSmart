@@ -28,15 +28,24 @@ from raster_tools import (
     get_raster_legend,
 )
 
+# Router para servir overlays PNG e bounds para o Leaflet
+from raster_tiles import router as tiles_router
+
+
 # Define o caminho para o ficheiro de dados
 DATA_FILE = Path(__file__).parent / "records.json"
 RASTERS_DIR = Path(__file__).parent.parent / "Dados rasters"
 
 app = FastAPI(
+
     title="Invasive Species AI API",
     description="API para explorar registos georreferenciados de espécies invasoras.",
     version="0.1.0",
 )
+
+# Mount router that serves /raster/overlay-info, /raster/tile, /raster/bounds
+app.include_router(tiles_router)
+
 
 # Configuração de CORS
 app.add_middleware(

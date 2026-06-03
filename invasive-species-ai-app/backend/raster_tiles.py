@@ -41,10 +41,9 @@ def _compute_bounds_from_transform(transform, width, height) -> dict:
     Calcula os limites geográficos exatos baseados na transformação de saída.
     Isto garante que o canto superior esquerdo e inferior direito batem certo com os píxeis.
     """
-    # Canto superior esquerdo (0,0) e inferior direito (width, height) na projeção alvo (EPSG:4326)
     west, north = transform * (0, 0)
     east, south = transform * (width, height)
-    
+
     return {
         "south": round(float(south), 6),
         "west": round(float(west), 6),
@@ -53,23 +52,36 @@ def _compute_bounds_from_transform(transform, width, height) -> dict:
     }
 
 
-def _raster_to_png_overlay(filepath: str, colormap: str = "YlOrRd") -> tuple[bytes, dict]:
+def _raster_to_png_overlay(filepath: str, colormap: str = "Greens5") -> tuple[bytes, dict]:
     if not RASTERIO_OK or not PIL_OK:
         raise RuntimeError("rasterio ou Pillow não estão instalados")
 
     with rasterio.open(filepath) as src:
-        # Definimos o CRS alvo do Leaflet/OSM para o cálculo de projeção interna (Web Mercator)
+        # ----------------------------------------------------------------
+        # CORREÇÃO: Detectar se é binário ANTES de reprojectar.
+        # O resampling bilinear interpola os valores 0/1 para floats
+        # intermédios (ex: 0.4521), fazendo com que o raster binário
+        # seja erroneamente tratado como contínuo.
+        # ----------------------------------------------------------------
+        nodata_val = src.nodata if src.nodata is not None else -9999
+        raw_sample = src.read(1)
+        raw_valid = raw_sample[raw_sample != nodata_val]
+        is_binary = (
+            len(raw_valid) > 0
+            and set(np.unique(raw_valid).tolist()).issubset({0, 1, 0.0, 1.0})
+        )
+
         web_mercator_crs = CRS.from_epsg(3857)
         wgs84_crs = CRS.from_epsg(4326)
 
-        # 1. Calcular a transformação nativa para Web Mercator (evita o shift de pixel-center)
+        # 1. Calcular a transformação nativa para Web Mercator
         transform_3857, width, height = calculate_default_transform(
             src.crs, web_mercator_crs, src.width, src.height, *src.bounds
         )
-        
-        # 2. Criar a matriz de destino e reprojectar os dados alinhados com a grelha Web
+
+        # 2. Reprojectar — nearest para binários (evita artefactos nas bordas),
+        #    bilinear para contínuos (suaviza e alinha melhor feições de costa)
         data_web = np.zeros((height, width), dtype=np.float32)
-        nodata_val = src.nodata if src.nodata is not None else -9999
 
         reproject(
             source=rasterio.band(src, 1),
@@ -78,17 +90,15 @@ def _raster_to_png_overlay(filepath: str, colormap: str = "YlOrRd") -> tuple[byt
             src_crs=src.crs,
             dst_transform=transform_3857,
             dst_crs=web_mercator_crs,
-            resampling=Resampling.bilinear,  # Suaviza e alinha melhor feições de costa
+            resampling=Resampling.nearest if is_binary else Resampling.bilinear,
             src_nodata=nodata_val,
             dst_nodata=nodata_val,
         )
 
-        # 3. CALCULAR OS BOUNDS FINAIS EM WGS84 DOS CANTOS EXATOS DA NOVA MATRIZ
-        # Isto elimina o erro de 2-3km porque converte os limites da imagem já projetada para a Web
+        # 3. Calcular bounds finais em WGS84
         west_m, north_m = transform_3857 * (0, 0)
         east_m, south_m = transform_3857 * (width, height)
 
-        # Converter os cantos métricos de Web Mercator para Graus Decimais (WGS84) que o Leaflet exige
         transformer = Transformer.from_crs(web_mercator_crs, wgs84_crs, always_xy=True)
         west, south = transformer.transform(west_m, south_m)
         east, north = transformer.transform(east_m, north_m)
@@ -100,14 +110,11 @@ def _raster_to_png_overlay(filepath: str, colormap: str = "YlOrRd") -> tuple[byt
             "east": round(float(east), 6),
         }
 
-        # 4. Processamento da Máscara e Cores (Mantém-se igual)
+        # 4. Máscara e cores
         mask = data_web != nodata_val
         valid = data_web[mask]
         if len(valid) == 0:
             raise ValueError("Raster sem dados válidos")
-
-        unique_vals = np.unique(valid)
-        is_binary = set(unique_vals.tolist()).issubset({0, 1})
 
         if is_binary:
             rgba = np.zeros((data_web.shape[0], data_web.shape[1], 4), dtype=np.uint8)
@@ -123,8 +130,7 @@ def _raster_to_png_overlay(filepath: str, colormap: str = "YlOrRd") -> tuple[byt
 
         # Converter para imagem PNG
         img = Image.fromarray(rgba, mode="RGBA")
-        
-        # Redimensionar se for gigante (mantendo proporção e alinhamento bilinear)
+
         max_dim = 1024
         h, w = rgba.shape[:2]
         if max(h, w) > max_dim:
@@ -169,7 +175,11 @@ def _ensure_cached(filepath: str, colormap: str) -> dict:
     if png_path.exists() and entry:
         try:
             with rasterio.open(filepath) as src:
-                entry["bounds"] = _compute_bounds_wgs84(src)
+                entry["bounds"] = _compute_bounds_from_transform(
+                    *calculate_default_transform(
+                        src.crs, CRS.from_epsg(3857), src.width, src.height, *src.bounds
+                    )
+                )
             index[key] = entry
             _save_index(index)
         except Exception:
@@ -200,8 +210,15 @@ def _apply_colormap(normalized: np.ndarray, mask: np.ndarray, colormap: str) -> 
     h, w = normalized.shape
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
 
-    # Colormaps definidos como gradientes RGB
     COLORMAPS = {
+        # 5 classes de verde claro a escuro (usado por defeito nos contínuos)
+        "Greens5": [
+            (237, 248, 233),   # 0.0–0.2  verde muito claro  #edf8e9
+            (186, 228, 179),   # 0.2–0.4  verde claro        #bae4b3
+            (116, 196, 120),   # 0.4–0.6  verde médio        #74c476
+            (49,  163, 84),    # 0.6–0.8  verde escuro       #31a354
+            (0,   109, 44),    # 0.8–1.0  verde muito escuro #006d2c
+        ],
         "YlOrRd": [
             (255, 255, 204),
             (254, 217, 142),
@@ -232,7 +249,7 @@ def _apply_colormap(normalized: np.ndarray, mask: np.ndarray, colormap: str) -> 
         ],
     }
 
-    colors = COLORMAPS.get(colormap, COLORMAPS["YlOrRd"])
+    colors = COLORMAPS.get(colormap, COLORMAPS["Greens5"])
     n = len(colors) - 1
 
     vals = normalized[mask]
@@ -257,7 +274,7 @@ def _apply_colormap(normalized: np.ndarray, mask: np.ndarray, colormap: str) -> 
     rgba_flat[flat_mask, 0] = r
     rgba_flat[flat_mask, 1] = g
     rgba_flat[flat_mask, 2] = b
-    rgba_flat[flat_mask, 3] = 200  # alpha (ligeiramente transparente)
+    rgba_flat[flat_mask, 3] = 200
 
     return rgba
 
@@ -271,22 +288,21 @@ def get_raster_tile(
     species: str,
     period: str = "hist",
     scenario: str = None,
-    colormap: str = "YlOrRd",
+    colormap: str = "Greens5",
 ):
     """
     Devolve um raster SDM como imagem PNG para overlay no Leaflet.
-    
+
     Parâmetros:
         - species: Nome científico (ex: Ailanthus_altissima)
         - period: hist | 2041-2070 | 2071-2100
         - scenario: ssp126 | ssp370 | ssp585 (não usado em hist)
-        - colormap: YlOrRd | Greens | Blues | RdPu
-    
+        - colormap: Greens5 | YlOrRd | Greens | Blues | RdPu
+
     Resposta: imagem PNG (usa junto com /raster/bounds/{species})
     """
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
     if not files:
-        # Tentar sem filtro binário
         files = get_raster_files(species=species, period=period, scenario=scenario)
     if not files:
         raise HTTPException(
@@ -310,7 +326,7 @@ def get_raster_bounds(
 ):
     """
     Devolve os bounds geográficos (WGS84) de um raster para posicionar o overlay no Leaflet.
-    
+
     Retorna: { south, west, north, east }
     """
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
@@ -323,7 +339,7 @@ def get_raster_bounds(
         )
 
     try:
-        entry = _ensure_cached(files[0], colormap="YlOrRd")
+        entry = _ensure_cached(files[0], colormap="Greens5")
         return {
             "species": species,
             "period": period,
@@ -340,7 +356,7 @@ def get_overlay_info(
     species: str,
     period: str = "hist",
     scenario: str = None,
-    colormap: str = "YlOrRd",
+    colormap: str = "Greens5",
 ):
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
     if not files:
@@ -349,10 +365,8 @@ def get_overlay_info(
         raise HTTPException(status_code=404, detail="Nenhum raster encontrado")
 
     try:
-        # Força o recálculo dos bounds corretos da imagem
         entry = _ensure_cached(files[0], colormap=colormap)
-        
-        # Garante o mapeamento direto e correto anti-deslocamento
+
         south = entry["bounds"]["south"]
         west = entry["bounds"]["west"]
         north = entry["bounds"]["north"]
@@ -364,8 +378,8 @@ def get_overlay_info(
         return {
             "tile_url": tile_url,
             "bounds": [
-                [float(south), float(west)],   # Canto Sudoeste (SW)
-                [float(north), float(east)]    # Canto Nordeste (NE)
+                [float(south), float(west)],
+                [float(north), float(east)]
             ],
             "species": species,
             "period": period,

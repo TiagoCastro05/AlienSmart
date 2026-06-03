@@ -9,29 +9,6 @@
     <!-- 1º OBRIGATÓRIO: Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
-    <!-- 2º OBRIGATÓRIO: Proj4 -->
-    <script src="https://unpkg.com/proj4"></script>
-
-    <!-- 2.5º CONFIGURAÇÃO DO PROJ4 -->
-    <script>
-      // Garantir que está global
-      window.proj4 = proj4;
-      
-      // EPSG:3035 (A projeção usada na Europa para grelhas estatísticas)
-      const proj3035 = "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs";
-      proj4.defs("EPSG:3035", proj3035);
-      proj4.defs("3035", proj3035); 
-
-      // EPSG:6933 (Projeção Global Equal-Area - A TUA PROJEÇÃO REAL)
-      const proj6933 = "+proj=cea +lon_0=0 +lat_ts=30 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs";
-      proj4.defs("EPSG:6933", proj6933);
-      proj4.defs("6933", proj6933);
-    </script>
-
-    <!-- 3º GeoRaster e o Plugin -->
-    <script src="https://unpkg.com/georaster"></script>
-    <script src="https://unpkg.com/georaster-layer-for-leaflet"></script>
-    
     <!-- Gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     
@@ -40,47 +17,59 @@
       aside { padding: 16px; background: #f4f6f4; border-right: 1px solid #d0d0d0; overflow-y: auto; }
       h1 { font-size: 22px; margin-top: 0; }
       h2 { font-size: 16px; margin-top: 16px; margin-bottom: 8px; }
-      label { font-weight: bold; display: block; margin-top: 12px; }
-      select, button { width: 100%; padding: 8px; margin-top: 6px; margin-bottom: 10px; box-sizing: border-box; }
+      label { font-weight: bold; display: block; margin-top: 12px; font-size: 13px; }
+      select, button { width: 100%; padding: 8px; margin-top: 6px; margin-bottom: 10px; box-sizing: border-box; font-size: 13px; }
       button { cursor: pointer; border: none; background: #2d6a4f; color: white; font-weight: bold; border-radius: 4px; }
       button:hover { background: #1b4332; }
       button:disabled { background: #a0a0a0; cursor: not-allowed; opacity: 0.6; }
-      button.toggle-active { background: #1b4332; }
       #map { height: 100vh; }
-      .metric { background: white; padding: 10px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #ddd; }
-      pre { background: white; border: 1px solid #ddd; padding: 12px; white-space: pre-wrap; border-radius: 6px; }
+      .metric { background: white; padding: 10px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #ddd; font-size: 13px; line-height: 1.4; }
+      pre { background: white; border: 1px solid #ddd; padding: 12px; white-space: pre-wrap; border-radius: 6px; font-size: 12px; }
       .chart-card { background: white; padding: 10px; margin-bottom: 12px; border-radius: 6px; border: 1px solid #ddd; }
       .chart-card h3 { margin: 6px 0 10px; font-size: 14px; }
       .report-actions { display: grid; gap: 8px; }
       .pdf-button { width: auto; padding: 6px 12px; margin-top: 8px; margin-bottom: 12px; font-size: 12px; font-weight: bold; }
-      .raster-controls { background: white; padding: 12px; border-radius: 6px; border: 1px solid #ddd; margin-bottom: 10px; }
-      .period-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-      .period-buttons button { padding: 6px; font-size: 12px; margin: 0; }
-      .raster-info { background: #e8f5e9; padding: 8px; border-radius: 4px; margin-bottom: 10px; font-size: 12px; color: #2d6a4f; }
-      .period-control { background: white; padding: 8px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); display: flex; gap: 4px; }
-      .period-control button { width: auto; padding: 6px 12px; margin: 0; font-size: 11px; border: 1px solid #ccc; background: white; color: #333; cursor: pointer; border-radius: 3px; transition: background 0.2s; }
-      .period-control button:hover { background: #f0f0f0; }
-      .period-control button.active { background: #2d6a4f !important; color: white; border-color: #2d6a4f; }
+      .raster-controls { background: white; padding: 14px; border-radius: 6px; border: 2px solid #2d6a4f; margin-bottom: 10px; }
+      .raster-controls label { font-size: 13px; color: #333; margin-top: 8px; }
+      .raster-controls select { padding: 6px; margin-bottom: 4px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
+      .raster-info { background: #e8f5e9; padding: 8px; border-radius: 4px; margin-top: 12px; font-size: 12px; color: #2d6a4f; }
     </style>
   </head>
   <body>
     <aside>
       <h1>Espécies Invasoras</h1>
-      <p>Protótipo para visualização, indicadores e relatório automático.</p>
+      <p style="font-size:12px; color: #555; margin-top:-5px;">Protótipo para visualização, indicadores e relatório automático.</p>
       
       <label for="speciesFilter">Filtrar por espécie</label>
       <select id="speciesFilter">
         <option value="">Todas as espécies</option>
       </select>
       
-      <label for="municipalityFilter">Filtrar por munícípio</label>
+      <label for="municipalityFilter">Filtrar por município</label>
       <select id="municipalityFilter">
         <option value="">Todos os municípios</option>
       </select>
 
       <!-- Controles de Rasters -->
       <div id="rasterControls" class="raster-controls" hidden>
-        <h3 style="margin-top: 0">Dados Raster</h3>
+        <h3 style="margin-top: 0; margin-bottom: 8px; color: #2d6a4f;">Dados Raster (SDM)</h3>
+
+        <label>Período Temporal</label>
+        <select id="periodFilter">
+          <option value="hist">Histórico (1981-2024)</option>
+          <option value="2041-2070">Futuro Médio (2041-2070)</option>
+          <option value="2071-2100">Futuro Longo (2071-2100)</option>
+        </select>
+
+        <div id="scenarioContainer" hidden>
+          <label>Cenário Climático (SSP)</label>
+          <select id="scenarioFilter">
+            <option value="ssp126">SSP1-2.6 (Emissões Baixas)</option>
+            <option value="ssp370" selected>SSP3-7.0 (Emissões Intermédias)</option>
+            <option value="ssp585">SSP5-8.5 (Emissões Altas)</option>
+          </select>
+        </div>
+
         <div id="rasterInfo" class="raster-info"></div>
       </div>
 
@@ -116,13 +105,40 @@
       let records = [];
       let markers = [];
       let speciesChart, municipalityChart, speciesDistributionChart;
+
+      // Estado dos rasters
       let currentRasterLayer = null;
       let currentPeriod = "hist";
-
-      // Controle para garantir que só o último raster seja processado/desenhado
+      let currentScenario = "ssp370";
       let currentRasterFetchId = 0;
       let currentRasterAbortController = null;
 
+      // =====================================================
+      // EVENTOS DOS FILTROS DE RASTER
+      // =====================================================
+
+      document.getElementById("periodFilter").addEventListener("change", (e) => {
+        currentPeriod = e.target.value;
+        // Mostrar/esconder cenário conforme o período selecionado
+        document.getElementById("scenarioContainer").hidden = (currentPeriod === "hist");
+        triggerRasterUpdate();
+      });
+
+      document.getElementById("scenarioFilter").addEventListener("change", (e) => {
+        currentScenario = e.target.value;
+        triggerRasterUpdate();
+      });
+
+      function triggerRasterUpdate() {
+        const selectedSpecies = document.getElementById("speciesFilter").value;
+        if (selectedSpecies) {
+          showRasterLayer(selectedSpecies);
+        }
+      }
+
+      // =====================================================
+      // LOADERS
+      // =====================================================
 
       async function loadRecords() {
         const response = await fetch(`${API_URL}/records`);
@@ -159,93 +175,81 @@
       // =====================================================
 
       async function showRasterLayer(species) {
-  if (currentRasterLayer) {
-    map.removeLayer(currentRasterLayer);
-    currentRasterLayer = null;
-  }
+        console.log(`[raster] showRasterLayer species=${species} period=${currentPeriod} scenario=${currentScenario}`);
 
-  if (currentRasterAbortController) currentRasterAbortController.abort();
-  currentRasterAbortController = new AbortController();
-  const { signal } = currentRasterAbortController;
-  currentRasterFetchId++;
-  const myFetchId = currentRasterFetchId;
+        // Remover camada antiga imediatamente para dar feedback visual
+        if (currentRasterLayer) {
+          map.removeLayer(currentRasterLayer);
+          currentRasterLayer = null;
+        }
 
-  try {
-    const encodedSpecies = encodeURIComponent(species);
-    const overlayInfoUrl = `${API_URL}/raster/overlay-info/${encodedSpecies}?period=${currentPeriod}&colormap=YlOrRd`;
+        // Cancelar pedido anterior
+        if (currentRasterAbortController) currentRasterAbortController.abort();
+        currentRasterAbortController = new AbortController();
+        const { signal } = currentRasterAbortController;
+        currentRasterFetchId++;
+        const myFetchId = currentRasterFetchId;
 
-    const overlayInfoResp = await fetch(overlayInfoUrl, { signal });
-    const overlayInfo = await overlayInfoResp.json();
+        try {
+          const encodedSpecies = encodeURIComponent(species);
 
-    if (currentRasterFetchId !== myFetchId) return;
+          // Construir URL com período e cenário (cenário só para períodos futuros)
+          let overlayInfoUrl = `${API_URL}/raster/overlay-info/${encodedSpecies}?period=${currentPeriod}&colormap=Greens5`;
+          if (currentPeriod !== "hist") {
+            overlayInfoUrl += `&scenario=${currentScenario}`;
+          }
 
-    // --- ADICIONA ESTES CONSOLE.LOGS PARA DIAGNÓSTICO ---
-    console.log("=== DIAGNÓSTICO RASTER ===");
-    console.log("URL da Imagem:", overlayInfo.tile_url);
-    console.log("Bounds recebidos do Backend:", JSON.stringify(overlayInfo.bounds));
+          const overlayInfoResp = await fetch(overlayInfoUrl, { signal });
+          if (!overlayInfoResp.ok) throw new Error(`Overlay info failed: ${overlayInfoResp.status}`);
+          const overlayInfo = await overlayInfoResp.json();
 
-    const cacheBuster = `cb=${Date.now()}`;
-    const tileUrl = `${API_URL}${overlayInfo.tile_url}&${cacheBuster}`;
+          if (currentRasterFetchId !== myFetchId) return;
 
-    document.getElementById("rasterControls").hidden = false;
+          console.log("Bounds recebidos:", JSON.stringify(overlayInfo.bounds));
 
-    // Criar o overlay e aplicar ao mapa
-    currentRasterLayer = L.imageOverlay(tileUrl, overlayInfo.bounds, {
-      opacity: 0.7,
-    }).addTo(map);
+          // Cache buster para forçar nova imagem
+          const cacheBuster = `cb=${Date.now()}_${Math.random().toString(16).slice(2)}`;
+          const baseTileUrl = `${API_URL}${overlayInfo.tile_url}`;
+          const tileUrl = baseTileUrl.includes("?")
+            ? `${baseTileUrl}&${cacheBuster}`
+            : `${baseTileUrl}?${cacheBuster}`;
 
-    // ISTO VAI FORÇAR O MAPA A IR TER COM O RASTER ONDE QUER QUE ELE ESTEJA
-    map.fitBounds(overlayInfo.bounds);
+          document.getElementById("rasterControls").hidden = false;
 
-  } catch (error) {
-    if (error && error.name === "AbortError") return;
-    console.error("Erro ao desenhar Raster:", error);
-  }
-}
+          currentRasterLayer = L.imageOverlay(tileUrl, overlayInfo.bounds, {
+            opacity: 0.7,
+          }).addTo(map);
 
+          map.fitBounds(overlayInfo.bounds);
 
+          // Atualizar info text com estatísticas
+          let statsUrl = `${API_URL}/raster/stats/${encodedSpecies}?period=${currentPeriod}`;
+          if (currentPeriod !== "hist") {
+            statsUrl += `&scenario=${currentScenario}`;
+          }
 
-      function setupRasterControls() {
-        const PeriodControl = L.Control.extend({
-          options: { position: "topright" },
-          onAdd: function (map) {
-            const container = L.DomUtil.create("div", "period-control");
-            const btnHistorical = L.DomUtil.create("button", "btn-historical active");
-            btnHistorical.innerHTML = " Histórico";
-            
-            const btnFuture = L.DomUtil.create("button", "btn-future");
-            btnFuture.innerHTML = " Futuro";
+          const statsResponse = await fetch(statsUrl, { signal });
+          if (statsResponse.ok && currentRasterFetchId === myFetchId) {
+            const rasterStats = await statsResponse.json();
+            const info = document.getElementById("rasterInfo");
+            const periodText = currentPeriod === "hist" ? "Histórico" : `Futuro (${currentPeriod})`;
+            const scenarioText = currentPeriod !== "hist" ? ` | Cenário: ${currentScenario.toUpperCase()}` : "";
+            info.innerHTML = `
+              <strong>${species}</strong><br>
+              Período: ${periodText}${scenarioText}<br>
+              Píxeis ativos: ${rasterStats.stats.count}
+            `;
+          }
 
-            container.appendChild(btnHistorical);
-            container.appendChild(btnFuture);
-
-            btnHistorical.addEventListener("click", async (e) => {
-              e.preventDefault();
-              currentPeriod = "hist";
-              btnHistorical.classList.add("active");
-              btnFuture.classList.remove("active");
-              const selectedSpecies = document.getElementById("speciesFilter").value;
-              if (selectedSpecies) await showRasterLayer(selectedSpecies);
-            });
-
-            btnFuture.addEventListener("click", async (e) => {
-              e.preventDefault();
-              currentPeriod = "2041-2070";
-              btnFuture.classList.add("active");
-              btnHistorical.classList.remove("active");
-              const selectedSpecies = document.getElementById("speciesFilter").value;
-              if (selectedSpecies) await showRasterLayer(selectedSpecies);
-            });
-
-            L.DomEvent.disableClickPropagation(container);
-            return container;
-          },
-        });
-        new PeriodControl().addTo(map);
+        } catch (error) {
+          if (error && error.name === "AbortError") return;
+          console.error("Erro ao desenhar Raster:", error);
+          document.getElementById("rasterInfo").innerHTML = `<strong>Aviso:</strong> Sem modelo SDM para esta data/cenário.`;
+        }
       }
 
       // =====================================================
-      // RESTO DAS FUNÇÕES GERAIS
+      // INDICADORES E GRÁFICOS
       // =====================================================
 
       async function loadSummary() {
@@ -311,6 +315,10 @@
         });
       }
 
+      // =====================================================
+      // MARCADORES E FILTROS
+      // =====================================================
+
       function showMarkers(data) {
         markers.forEach((marker) => marker.remove());
         markers = [];
@@ -325,31 +333,32 @@
         const selectedSpecies = document.getElementById("speciesFilter").value;
         const selectedMunicipality = document.getElementById("municipalityFilter").value;
         const filteredRecords = records.filter((record) => {
-          const speciesMatch = !selectedSpecies || record.species === selectedSpecies;
+          const speciesMatch = !selectedSpecies || record.species.replace(/_/g, " ") === selectedSpecies.replace(/_/g, " ");
           const municipalityMatch = !selectedMunicipality || record.municipality === selectedMunicipality;
           return speciesMatch && municipalityMatch;
         });
         showMarkers(filteredRecords);
 
         if (selectedSpecies) {
+          document.getElementById("rasterControls").hidden = false;
           await showRasterLayer(selectedSpecies);
         } else {
-          // Se o utilizador selecionar "Todas as espécies", cancelamos qualquer
-          // download de raster que esteja a decorrer.
+          // Limpar raster se "Todas as espécies" for selecionado
           currentRasterFetchId++;
-          if (currentRasterAbortController) {
-            currentRasterAbortController.abort();
-          }
+          if (currentRasterAbortController) currentRasterAbortController.abort();
           if (currentRasterLayer) {
             map.removeLayer(currentRasterLayer);
             currentRasterLayer = null;
           }
           document.getElementById("rasterControls").hidden = true;
-
         }
       }
 
       function filterByMunicipality() { filterBySpecies(); }
+
+      // =====================================================
+      // RELATÓRIOS
+      // =====================================================
 
       async function generateTemplateReport() {
         document.getElementById("report").textContent = "A gerar relatório por template...";
@@ -390,13 +399,16 @@
         window.open(`${API_URL}/report/pdf?${params.toString()}`, "_blank");
       }
 
+      // =====================================================
+      // EVENT LISTENERS E ARRANQUE
+      // =====================================================
+
       document.getElementById("speciesFilter").addEventListener("change", filterBySpecies);
       document.getElementById("municipalityFilter").addEventListener("change", filterByMunicipality);
       document.getElementById("templateButton").addEventListener("click", generateTemplateReport);
       document.getElementById("reportButton").addEventListener("click", generateAIReport);
       document.getElementById("pdfButton").addEventListener("click", exportPdf);
 
-      setupRasterControls();
       loadRecords();
       loadSpecies();
       loadMunicipalities();

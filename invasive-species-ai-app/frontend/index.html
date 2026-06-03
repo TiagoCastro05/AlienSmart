@@ -9,6 +9,29 @@
     <!-- 1º OBRIGATÓRIO: Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
+    <!-- 2º OBRIGATÓRIO: Proj4 -->
+    <script src="https://unpkg.com/proj4"></script>
+
+    <!-- 2.5º CONFIGURAÇÃO DO PROJ4 -->
+    <script>
+      // Garantir que está global
+      window.proj4 = proj4;
+      
+      // EPSG:3035 (A projeção usada na Europa para grelhas estatísticas)
+      const proj3035 = "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs";
+      proj4.defs("EPSG:3035", proj3035);
+      proj4.defs("3035", proj3035); 
+
+      // EPSG:6933 (Projeção Global Equal-Area - A TUA PROJEÇÃO REAL)
+      const proj6933 = "+proj=cea +lon_0=0 +lat_ts=30 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs";
+      proj4.defs("EPSG:6933", proj6933);
+      proj4.defs("6933", proj6933);
+    </script>
+
+    <!-- 3º GeoRaster e o Plugin -->
+    <script src="https://unpkg.com/georaster"></script>
+    <script src="https://unpkg.com/georaster-layer-for-leaflet"></script>
+    
     <!-- Gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     
@@ -33,6 +56,9 @@
       .raster-controls label { font-size: 13px; color: #333; margin-top: 8px; }
       .raster-controls select { padding: 6px; margin-bottom: 4px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
       .raster-info { background: #e8f5e9; padding: 8px; border-radius: 4px; margin-top: 12px; font-size: 12px; color: #2d6a4f; }
+      
+      /* Estilo da Legenda do Raster */
+      .raster-legend { background: white; padding: 10px 14px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.25); border: 1px solid #ddd; }
     </style>
   </head>
   <body>
@@ -114,6 +140,27 @@
       let currentRasterAbortController = null;
 
       // =====================================================
+      // LEGENDA DO RASTER NO MAPA
+      // =====================================================
+      const rasterLegend = L.control({ position: "bottomright" });
+      rasterLegend.onAdd = function () {
+        const div = L.DomUtil.create("div", "raster-legend");
+        div.innerHTML = `
+          <h4 style="margin: 0 0 6px 0; font-size: 13px; color: #1b4332;">Adequabilidade / Presença</h4>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 11px; font-weight: bold; color: #555;">0</span>
+            <div style="width: 130px; height: 14px; background: linear-gradient(to right, rgba(237,248,233,0.5), #bae4b3, #74c476, #31a354, #006d2c); border: 1px solid #aaa; border-radius: 3px;"></div>
+            <span style="font-size: 11px; font-weight: bold; color: #555;">1</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 10px; color: #777; margin-top: 4px;">
+            <span>Baixa/Ausência</span>
+            <span>Alta/Presença</span>
+          </div>
+        `;
+        return div;
+      };
+
+      // =====================================================
       // EVENTOS DOS FILTROS DE RASTER
       // =====================================================
 
@@ -177,9 +224,10 @@
       async function showRasterLayer(species) {
         console.log(`[raster] showRasterLayer species=${species} period=${currentPeriod} scenario=${currentScenario}`);
 
-        // Remover camada antiga imediatamente para dar feedback visual
+        // Remover camada e legenda antigas imediatamente para dar feedback visual
         if (currentRasterLayer) {
           map.removeLayer(currentRasterLayer);
+          map.removeControl(rasterLegend);
           currentRasterLayer = null;
         }
 
@@ -219,6 +267,9 @@
           currentRasterLayer = L.imageOverlay(tileUrl, overlayInfo.bounds, {
             opacity: 0.7,
           }).addTo(map);
+
+          // Adicionar a Legenda ao mapa
+          rasterLegend.addTo(map);
 
           map.fitBounds(overlayInfo.bounds);
 
@@ -315,10 +366,6 @@
         });
       }
 
-      // =====================================================
-      // MARCADORES E FILTROS
-      // =====================================================
-
       function showMarkers(data) {
         markers.forEach((marker) => marker.remove());
         markers = [];
@@ -343,11 +390,14 @@
           document.getElementById("rasterControls").hidden = false;
           await showRasterLayer(selectedSpecies);
         } else {
-          // Limpar raster se "Todas as espécies" for selecionado
+          // Se o utilizador selecionar "Todas as espécies", cancelamos qualquer download.
           currentRasterFetchId++;
-          if (currentRasterAbortController) currentRasterAbortController.abort();
+          if (currentRasterAbortController) {
+            currentRasterAbortController.abort();
+          }
           if (currentRasterLayer) {
             map.removeLayer(currentRasterLayer);
+            map.removeControl(rasterLegend);
             currentRasterLayer = null;
           }
           document.getElementById("rasterControls").hidden = true;
@@ -355,10 +405,6 @@
       }
 
       function filterByMunicipality() { filterBySpecies(); }
-
-      // =====================================================
-      // RELATÓRIOS
-      // =====================================================
 
       async function generateTemplateReport() {
         document.getElementById("report").textContent = "A gerar relatório por template...";
@@ -399,16 +445,13 @@
         window.open(`${API_URL}/report/pdf?${params.toString()}`, "_blank");
       }
 
-      // =====================================================
-      // EVENT LISTENERS E ARRANQUE
-      // =====================================================
-
       document.getElementById("speciesFilter").addEventListener("change", filterBySpecies);
       document.getElementById("municipalityFilter").addEventListener("change", filterByMunicipality);
       document.getElementById("templateButton").addEventListener("click", generateTemplateReport);
       document.getElementById("reportButton").addEventListener("click", generateAIReport);
       document.getElementById("pdfButton").addEventListener("click", exportPdf);
 
+      // Inicia a aplicação
       loadRecords();
       loadSpecies();
       loadMunicipalities();

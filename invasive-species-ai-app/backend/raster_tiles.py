@@ -11,6 +11,8 @@ from fastapi.responses import Response
 import numpy as np
 import io
 
+from pyproj import Transformer
+
 try:
     import rasterio
     from rasterio.warp import reproject, Resampling, calculate_default_transform, transform_bounds
@@ -34,19 +36,15 @@ TILES_DIR = STATIC_DIR / "tiles"
 TILES_INDEX_PATH = STATIC_DIR / "tiles_index.json"
 
 
-def _compute_bounds_wgs84(src: rasterio.DatasetReader) -> dict:
-    if not src.crs:
-        raise RuntimeError("Raster sem CRS definido")
-
-    dst_crs = CRS.from_epsg(4326)
-    if src.crs == dst_crs:
-        bounds = src.bounds
-        west, south, east, north = bounds.left, bounds.bottom, bounds.right, bounds.top
-    else:
-        west, south, east, north = transform_bounds(
-            src.crs, dst_crs, *src.bounds, densify_pts=21
-        )
-
+def _compute_bounds_from_transform(transform, width, height) -> dict:
+    """
+    Calcula os limites geográficos exatos baseados na transformação de saída.
+    Isto garante que o canto superior esquerdo e inferior direito batem certo com os píxeis.
+    """
+    # Canto superior esquerdo (0,0) e inferior direito (width, height) na projeção alvo (EPSG:4326)
+    west, north = transform * (0, 0)
+    east, south = transform * (width, height)
+    
     return {
         "south": round(float(south), 6),
         "west": round(float(west), 6),
@@ -56,51 +54,55 @@ def _compute_bounds_wgs84(src: rasterio.DatasetReader) -> dict:
 
 
 def _raster_to_png_overlay(filepath: str, colormap: str = "YlOrRd") -> tuple[bytes, dict]:
-    """
-    Converte um raster .tif para PNG RGBA + bounds em WGS84.
-    
-    Returns:
-        (png_bytes, bounds_dict)
-        bounds_dict = {"south": float, "west": float, "north": float, "east": float}
-    """
-    if not RASTERIO_OK:
-        raise RuntimeError("rasterio não está instalado")
-    if not PIL_OK:
-        raise RuntimeError("Pillow não está instalado: pip install Pillow")
+    if not RASTERIO_OK or not PIL_OK:
+        raise RuntimeError("rasterio ou Pillow não estão instalados")
 
     with rasterio.open(filepath) as src:
-        # Reprojectar para WGS84 se necessário
-        dst_crs = CRS.from_epsg(4326)
+        # Definimos o CRS alvo do Leaflet/OSM para o cálculo de projeção interna (Web Mercator)
+        web_mercator_crs = CRS.from_epsg(3857)
+        wgs84_crs = CRS.from_epsg(4326)
 
-        if src.crs != dst_crs:
-            transform, width, height = calculate_default_transform(
-                src.crs, dst_crs, src.width, src.height, *src.bounds
-            )
-            data_wgs84 = np.zeros((height, width), dtype=np.float32)
-            nodata_val = src.nodata if src.nodata is not None else -9999
+        # 1. Calcular a transformação nativa para Web Mercator (evita o shift de pixel-center)
+        transform_3857, width, height = calculate_default_transform(
+            src.crs, web_mercator_crs, src.width, src.height, *src.bounds
+        )
+        
+        # 2. Criar a matriz de destino e reprojectar os dados alinhados com a grelha Web
+        data_web = np.zeros((height, width), dtype=np.float32)
+        nodata_val = src.nodata if src.nodata is not None else -9999
 
-            reproject(
-                source=rasterio.band(src, 1),
-                destination=data_wgs84,
-                src_transform=src.transform,
-                src_crs=src.crs,
-                dst_transform=transform,
-                dst_crs=dst_crs,
-                resampling=Resampling.nearest,
-                src_nodata=nodata_val,
-                dst_nodata=nodata_val,
-            )
+        reproject(
+            source=rasterio.band(src, 1),
+            destination=data_web,
+            src_transform=src.transform,
+            src_crs=src.crs,
+            dst_transform=transform_3857,
+            dst_crs=web_mercator_crs,
+            resampling=Resampling.bilinear,  # Suaviza e alinha melhor feições de costa
+            src_nodata=nodata_val,
+            dst_nodata=nodata_val,
+        )
 
-        else:
-            data_wgs84 = src.read(1).astype(np.float32)
-            nodata_val = src.nodata if src.nodata is not None else -9999
-        bounds_dict = _compute_bounds_wgs84(src)
+        # 3. CALCULAR OS BOUNDS FINAIS EM WGS84 DOS CANTOS EXATOS DA NOVA MATRIZ
+        # Isto elimina o erro de 2-3km porque converte os limites da imagem já projetada para a Web
+        west_m, north_m = transform_3857 * (0, 0)
+        east_m, south_m = transform_3857 * (width, height)
 
-        # Máscara de nodata
-        mask = data_wgs84 != nodata_val
+        # Converter os cantos métricos de Web Mercator para Graus Decimais (WGS84) que o Leaflet exige
+        transformer = Transformer.from_crs(web_mercator_crs, wgs84_crs, always_xy=True)
+        west, south = transformer.transform(west_m, south_m)
+        east, north = transformer.transform(east_m, north_m)
 
-        # Detectar binario vs continuo
-        valid = data_wgs84[mask]
+        bounds_dict = {
+            "south": round(float(south), 6),
+            "west": round(float(west), 6),
+            "north": round(float(north), 6),
+            "east": round(float(east), 6),
+        }
+
+        # 4. Processamento da Máscara e Cores (Mantém-se igual)
+        mask = data_web != nodata_val
+        valid = data_web[mask]
         if len(valid) == 0:
             raise ValueError("Raster sem dados válidos")
 
@@ -108,32 +110,26 @@ def _raster_to_png_overlay(filepath: str, colormap: str = "YlOrRd") -> tuple[byt
         is_binary = set(unique_vals.tolist()).issubset({0, 1})
 
         if is_binary:
-            rgba = np.zeros((data_wgs84.shape[0], data_wgs84.shape[1], 4), dtype=np.uint8)
-            hits = (data_wgs84 == 1) & mask
+            rgba = np.zeros((data_web.shape[0], data_web.shape[1], 4), dtype=np.uint8)
+            hits = (data_web == 1) & mask
             rgba[hits, 0] = 45
             rgba[hits, 1] = 106
             rgba[hits, 2] = 79
             rgba[hits, 3] = 200
         else:
             vmin, vmax = float(valid.min()), float(valid.max())
-            if vmax == vmin:
-                normalized = np.zeros_like(data_wgs84)
-            else:
-                normalized = np.clip((data_wgs84 - vmin) / (vmax - vmin), 0, 1)
-
-            # Aplicar colormap (sem matplotlib — implementação manual)
+            normalized = np.zeros_like(data_web) if vmax == vmin else np.clip((data_web - vmin) / (vmax - vmin), 0, 1)
             rgba = _apply_colormap(normalized, mask, colormap)
 
-        # Converter para PNG
+        # Converter para imagem PNG
         img = Image.fromarray(rgba, mode="RGBA")
-
-        # Redimensionar se muito grande (max 1024px no lado maior)
+        
+        # Redimensionar se for gigante (mantendo proporção e alinhamento bilinear)
         max_dim = 1024
         h, w = rgba.shape[:2]
         if max(h, w) > max_dim:
             scale = max_dim / max(h, w)
-            new_w, new_h = int(w * scale), int(h * scale)
-            img = img.resize((new_w, new_h), Image.NEAREST)
+            img = img.resize((int(w * scale), int(h * scale)), Image.BILINEAR)
 
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
@@ -346,30 +342,21 @@ def get_overlay_info(
     scenario: str = None,
     colormap: str = "YlOrRd",
 ):
-    """
-    Endpoint de conveniência: devolve URL da tile + bounds num único pedido.
-    O frontend usa isto para montar o ImageOverlay do Leaflet sem dois pedidos.
-    
-    Retorna:
-    {
-        "tile_url": "/raster/tile/{species}?period=...&scenario=...&colormap=...",
-        "bounds": [[south, west], [north, east]],   ← formato Leaflet
-        "species": "...",
-        "period": "...",
-        "scenario": "..."
-    }
-    """
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
     if not files:
         files = get_raster_files(species=species, period=period, scenario=scenario)
     if not files:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Nenhum raster encontrado para {species} / {period} / {scenario}"
-        )
+        raise HTTPException(status_code=404, detail="Nenhum raster encontrado")
 
     try:
+        # Força o recálculo dos bounds corretos da imagem
         entry = _ensure_cached(files[0], colormap=colormap)
+        
+        # Garante o mapeamento direto e correto anti-deslocamento
+        south = entry["bounds"]["south"]
+        west = entry["bounds"]["west"]
+        north = entry["bounds"]["north"]
+        east = entry["bounds"]["east"]
 
         scenario_param = f"&scenario={scenario}" if scenario else ""
         tile_url = f"/raster/tile/{species}?period={period}{scenario_param}&colormap={colormap}"
@@ -377,13 +364,12 @@ def get_overlay_info(
         return {
             "tile_url": tile_url,
             "bounds": [
-                [entry["bounds"]["south"], entry["bounds"]["west"]],
-                [entry["bounds"]["north"], entry["bounds"]["east"]],
+                [float(south), float(west)],   # Canto Sudoeste (SW)
+                [float(north), float(east)]    # Canto Nordeste (NE)
             ],
             "species": species,
             "period": period,
-            "scenario": scenario,
-            "file": Path(files[0]).name,
+            "scenario": scenario
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

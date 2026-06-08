@@ -5,7 +5,9 @@
     <title>Espécies Invasoras — Protótipo</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     
     <style>
@@ -19,7 +21,6 @@
       button:hover { background: #1b4332; }
       button:disabled { background: #a0a0a0; cursor: not-allowed; opacity: 0.6; }
       #map { height: 100vh; }
-      
       .metric { background: white; padding: 10px; margin-bottom: 8px; border-radius: 6px; border: 1px solid #ddd; font-size: 13px; line-height: 1.4; }
       pre { background: white; border: 1px solid #ddd; padding: 12px; white-space: pre-wrap; border-radius: 6px; font-size: 12px; }
       .chart-card { background: white; padding: 10px; margin-bottom: 12px; border-radius: 6px; border: 1px solid #ddd; }
@@ -35,8 +36,8 @@
       .multiselect-option:hover { background: #f4f6f4; }
       .multiselect-option input { margin: 0; cursor: pointer; }
 
-      /* Cartões (Fichas) de Controlo por Espécie */
-      #rasterCardsContainer { margin-top: 15px; }
+      /* Cartões de Espécies Ativas */
+      #rasterCardsContainer { margin-top: 15px; margin-bottom: 15px; }
       .species-card { background: white; border: 1px solid #ccc; border-radius: 6px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
       .species-card-header { padding: 10px 12px; background: #e8f5e9; font-weight: bold; color: #1b4332; display: flex; justify-content: space-between; align-items: center; cursor: pointer; border-radius: 6px 6px 0 0; }
       .species-card-body { padding: 12px; border-top: 1px solid #ddd; }
@@ -46,7 +47,7 @@
       .remove-btn:hover { background: none; color: #ff0000; }
       .raster-info { background: #f9f9f9; padding: 8px; border-radius: 4px; margin-top: 10px; font-size: 12px; color: #333; border: 1px dashed #ccc; }
 
-      /* Estilo da Legenda do Raster Múltipla */
+      /* Estilo da Legenda do Raster Multipla */
       .raster-legend { background: white; padding: 12px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); border: 1px solid #ccc; min-width: 180px; max-width: 250px;}
       .raster-legend h4 { margin: 0 0 10px 0; font-size: 13px; color: #1b4332; }
       .legend-item { margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 6px;}
@@ -63,20 +64,25 @@
       <h1>Espécies Invasoras</h1>
       <p style="font-size:12px; color: #555; margin-top:-5px;">Protótipo para visualização, indicadores e relatório automático.</p>
       
-      <label>Filtrar espécies no Mapa (Multiselect)</label>
-      <div class="custom-multiselect">
-        <div class="multiselect-header" onclick="toggleDropdown()">
-          <span id="multiselectLabel">Selecionar Espécies...</span>
+      <label>Filtrar espécies no Mapa</label>
+      <div class="custom-multiselect" id="speciesDropdownContainer">
+        <div class="multiselect-header" onclick="toggleDropdown('speciesOptions')">
+          <span id="speciesSelectLabel">Selecionar Espécies...</span>
           <span>▼</span>
         </div>
         <div class="multiselect-options" id="speciesOptions" hidden>
           </div>
       </div>
       
-      <label for="municipalityFilter">Filtrar por município</label>
-      <select id="municipalityFilter">
-        <option value="">Todos os municípios</option>
-      </select>
+      <label>Filtrar por municípios</label>
+      <div class="custom-multiselect" id="muniDropdownContainer">
+        <div class="multiselect-header" onclick="toggleDropdown('muniOptions')">
+          <span id="muniSelectLabel">Todos os municípios</span>
+          <span>▼</span>
+        </div>
+        <div class="multiselect-options" id="muniOptions" hidden>
+          </div>
+      </div>
 
       <div id="rasterCardsContainer"></div>
 
@@ -113,7 +119,15 @@
       let markers = [];
       let speciesChart, municipalityChart, speciesDistributionChart;
 
+      // =====================================================
+      // ESTADOS GLOBAIS MULTI-SELECT
+      // =====================================================
+      const AVAILABLE_COLORMAPS = ["Greens5", "YlOrRd", "Blues", "RdPu"];
+      let activeSpeciesConfigs = {}; // { "Especie": { period, scenario, binary, colormap, layer... } }
+      let activeMunicipalities = []; // Array de nomes de municípios selecionados
+      let currentZIndex = 400; // Para colocar a última espécie alterada por cima
 
+      // GeoJSON dos municípios
       const MUNICIPIOS_GEOJSON_URL = "https://raw.githubusercontent.com/nmota/caop_GeoJSON/master/Portugal_Municipalities.geojson";
       let municipiosGeoJSON = null;
       let municipioHighlightLayer = null;
@@ -130,125 +144,83 @@
         return municipiosGeoJSON;
       }
 
-      async function highlightMunicipality(municipalityName) {
+      // =====================================================
+      // UI: DROPDOWNS E CHECKBOXES
+      // =====================================================
+      function toggleDropdown(id) {
+        const optionsDiv = document.getElementById(id);
+        optionsDiv.hidden = !optionsDiv.hidden;
+      }
+
+      // Fecha menus se clicarmos fora
+      document.addEventListener("click", (evt) => {
+        document.querySelectorAll(".custom-multiselect").forEach(dropdown => {
+          if (!dropdown.contains(evt.target)) {
+            const optionsDiv = dropdown.querySelector(".multiselect-options");
+            if (optionsDiv) optionsDiv.hidden = true;
+          }
+        });
+      });
+
+      // =====================================================
+      // LÓGICA DE MUNICÍPIOS (HIGHLIGHTS E FILTRO)
+      // =====================================================
+      function handleMuniCheckbox(checkbox) {
+        if (checkbox.checked) {
+          activeMunicipalities.push(checkbox.value);
+        } else {
+          activeMunicipalities = activeMunicipalities.filter(m => m !== checkbox.value);
+        }
+        
+        document.getElementById("muniSelectLabel").textContent = activeMunicipalities.length === 0 
+          ? "Todos os municípios" 
+          : `${activeMunicipalities.length} município(s) focado(s)`;
+          
+        filterPoints();
+        highlightMunicipalities();
+      }
+
+      async function highlightMunicipalities() {
         if (municipioHighlightLayer) {
           map.removeLayer(municipioHighlightLayer);
           municipioHighlightLayer = null;
         }
-        if (!municipalityName) return;
+        
+        if (activeMunicipalities.length === 0) return;
 
         try {
           const geojson = await loadMunicipiosGeoJSON();
           if (!geojson) return;
 
           const norm = s => s.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-          const procurado = norm(municipalityName);
+          const procurados = activeMunicipalities.map(m => norm(m));
 
-          const feature = geojson.features.find(f =>
-            norm(f.properties.Concelho || "") === procurado
+          // Encontra TODOS os features correspondentes
+          const features = geojson.features.filter(f =>
+            procurados.includes(norm(f.properties.Concelho || ""))
           );
 
-          if (!feature || !feature.geometry) return;
+          if (features.length === 0) return;
 
-          municipioHighlightLayer = L.geoJSON(feature, {
-            style: { color: "#cc0000", weight: 3, fillColor: "#ff4444", fillOpacity: 0.15, dashArray: "6 3" },
-            interactive: false
+          municipioHighlightLayer = L.geoJSON(features, {
+            style: {
+              color: "#cc0000",
+              weight: 3,
+              fillColor: "#ff4444",
+              fillOpacity: 0.15,
+              dashArray: "6 3",
+            }
           }).addTo(map);
 
           map.fitBounds(municipioHighlightLayer.getBounds(), { padding: [40, 40] });
         } catch (e) {
-          console.error("Erro ao highlight município:", e);
+          console.error("Erro ao highlight municípios:", e);
         }
       }
 
-
-
-
-
-      // Estado Global dos Rasters Múltiplos
-      const AVAILABLE_COLORMAPS = ["Greens5", "YlOrRd", "Blues", "RdPu"];
-      
-      // Ojecto de configuração para cada espécie ativada
-      // { "Acacia dealbata": { period: "hist", scenario: "ssp370", binary: true, colormap: "Greens5", layer: leafletLayer, abortController: null } }
-      let activeSpeciesConfigs = {}; 
-      let currentZIndex = 400; // Começa na base do overlayPane
-
-      // Paletas de Cor em JS para a Legenda (igual ao Backend)
-      const COLORMAP_STOPS = {
-        "Greens5": ["#edf8e9", "#bae4b3", "#74c476", "#31a354", "#006d2c"],
-        "YlOrRd":  ["#ffffcc", "#fed976", "#fd8d3c", "#e31a1c", "#800026"],
-        "Greens":  ["#edf8e9", "#bae4b3", "#74c476", "#31a354", "#006d2c"],
-        "Blues":   ["#eff3ff", "#bdd7e7", "#6baed6", "#3182bd", "#08519c"],
-        "RdPu":    ["#feebe2", "#fbb4b9", "#f768a1", "#ae017e", "#49006a"],
-      };
-
       // =====================================================
-      // LEGENDA MULTI-RASTER NO MAPA
+      // LÓGICA DE ESPÉCIES (CARTÕES E RASTERS)
       // =====================================================
-      const rasterLegend = L.control({ position: "bottomright" });
-      rasterLegend.onAdd = function () {
-        this._div = L.DomUtil.create("div", "raster-legend");
-        this._div.style.display = "none";
-        return this._div;
-      };
-      
-      rasterLegend.update = function () {
-        const activeKeys = Object.keys(activeSpeciesConfigs);
-        if (activeKeys.length === 0) {
-          this._div.style.display = "none";
-          return;
-        }
-
-        let html = `<h4>Legenda do SDM</h4>`;
-        
-        activeKeys.forEach(species => {
-          const config = activeSpeciesConfigs[species];
-          const stops = COLORMAP_STOPS[config.colormap] || COLORMAP_STOPS["Greens5"];
-          const darkestColor = stops[stops.length - 1];
-
-          html += `<div class="legend-item"><span class="legend-sp-name">${species.replace(/_/g, " ")}</span>`;
-          
-          if (config.binary) {
-            html += `
-              <div class="legend-binary">
-                <div class="legend-swatch" style="background:${darkestColor}; opacity:0.8;"></div>
-                <span>Presença</span>
-              </div>`;
-          } else {
-            const gradient = `linear-gradient(to right, ${stops.join(", ")})`;
-            html += `
-              <div class="legend-gradient" style="background:${gradient};"></div>
-              <div class="legend-labels"><span>Ausência</span><span>Alta</span></div>`;
-          }
-          html += `</div>`;
-        });
-
-        this._div.innerHTML = html;
-        this._div.style.display = "block";
-      };
-      rasterLegend.addTo(map);
-
-      // =====================================================
-      // UI DO MULTI-SELECT E CARTÕES
-      // =====================================================
-      function toggleDropdown() {
-        const optionsDiv = document.getElementById("speciesOptions");
-        optionsDiv.hidden = !optionsDiv.hidden;
-      }
-
-      function toggleCardBody(safeSp) {
-        const body = document.getElementById(`body-${safeSp}`);
-        body.style.display = body.style.display === "none" ? "block" : "none";
-      }
-
-      function updateMultiselectLabel() {
-        const activeCount = Object.keys(activeSpeciesConfigs).length;
-        document.getElementById("multiselectLabel").textContent = activeCount === 0 
-          ? "Selecionar Espécies..." 
-          : `${activeCount} espécie(s) no mapa`;
-      }
-
-      // Reage aos cliques nas checkboxes do dropdown
       function handleSpeciesCheckbox(checkbox) {
         const species = checkbox.value;
         if (checkbox.checked) {
@@ -258,22 +230,21 @@
         }
       }
 
-      // Função acionada pelo botão (X) do cartão
+      function toggleCardBody(safeSp) {
+        const body = document.getElementById(`body-${safeSp}`);
+        body.style.display = body.style.display === "none" ? "block" : "none";
+      }
+
       window.removeSpeciesFromCard = function(species, event) {
-        event.stopPropagation(); // Evita colapsar o cartão
-        
-        // Remove a checkbox
-        const checkbox = document.querySelector(`.multiselect-option input[value="${species}"]`);
+        event.stopPropagation();
+        const checkbox = document.querySelector(`#speciesOptions input[value="${species}"]`);
         if (checkbox) checkbox.checked = false;
-        
         removeSpeciesLayer(species);
       };
 
-      // Adiciona uma espécie à memória e cria o cartão visual
       function addSpeciesLayer(species) {
-        if (activeSpeciesConfigs[species]) return; // Já existe
+        if (activeSpeciesConfigs[species]) return;
 
-        // Assignar a paleta de cores seguinte disponível
         const colorIndex = Object.keys(activeSpeciesConfigs).length % AVAILABLE_COLORMAPS.length;
         const assignedColormap = AVAILABLE_COLORMAPS[colorIndex];
 
@@ -283,14 +254,14 @@
           binary: true,
           colormap: assignedColormap,
           layer: null,
-          abortController: null
+          abortController: null,
+          hasZoomed: false
         };
 
         const safeSp = species.replace(/\s+/g, '_');
         const colorStops = COLORMAP_STOPS[assignedColormap];
-        const dotColor = colorStops[colorStops.length - 1]; // Cor mais escura
+        const dotColor = colorStops[colorStops.length - 1];
 
-        // Criar Cartão
         const cardHtml = `
           <div class="species-card" id="card-${safeSp}">
             <div class="species-card-header" onclick="toggleCardBody('${safeSp}')">
@@ -344,61 +315,52 @@
 
         document.getElementById("rasterCardsContainer").insertAdjacentHTML('afterbegin', cardHtml);
         
-        updateMultiselectLabel();
-        filterPoints(); // Atualizar os marcadores pontuais
-        fetchAndDrawRaster(species); // Descarregar e desenhar o raster
+        document.getElementById("speciesSelectLabel").textContent = `${Object.keys(activeSpeciesConfigs).length} espécie(s) no mapa`;
+        filterPoints();
+        fetchAndDrawRaster(species);
       }
 
       function removeSpeciesLayer(species) {
         if (!activeSpeciesConfigs[species]) return;
-        
-        // Cancela downloads pendentes e remove do mapa
         if (activeSpeciesConfigs[species].abortController) activeSpeciesConfigs[species].abortController.abort();
         if (activeSpeciesConfigs[species].layer) map.removeLayer(activeSpeciesConfigs[species].layer);
         
         delete activeSpeciesConfigs[species];
 
-        // Remove Cartão Visual
         const safeSp = species.replace(/\s+/g, '_');
         const card = document.getElementById(`card-${safeSp}`);
         if (card) card.remove();
 
-        updateMultiselectLabel();
+        const count = Object.keys(activeSpeciesConfigs).length;
+        document.getElementById("speciesSelectLabel").textContent = count === 0 ? "Selecionar Espécies..." : `${count} espécie(s) no mapa`;
+        
         rasterLegend.update();
         filterPoints();
       }
 
-      // Função chamada pelas dropdowns dentro de cada cartão
       window.updateSpeciesConfig = function(species, key, value) {
         if (!activeSpeciesConfigs[species]) return;
-        
         activeSpeciesConfigs[species][key] = value;
         const safeSp = species.replace(/\s+/g, '_');
 
-        // Lógica especial de UI: Esconder o cenário se for histórico
         if (key === 'period') {
           document.getElementById(`scen-container-${safeSp}`).hidden = (value === 'hist');
         }
 
-        // Lógica de UI: Atualizar a bolinha da cor no header caso o colormap mude
         if (key === 'colormap') {
            const colorStops = COLORMAP_STOPS[value];
            const dotColor = colorStops[colorStops.length - 1];
            document.querySelector(`#card-${safeSp} .species-card-header span span`).style.background = dotColor;
         }
 
-        fetchAndDrawRaster(species); // Voltar a desenhar com as novas definições
+        fetchAndDrawRaster(species);
       };
 
-      // =====================================================
-      // LÓGICA CORE DE FETCH E RENDERIZAÇÃO
-      // =====================================================
       async function fetchAndDrawRaster(species) {
         const config = activeSpeciesConfigs[species];
         const safeSp = species.replace(/\s+/g, '_');
         const infoDiv = document.getElementById(`info-${safeSp}`);
         
-        // Cancelar pedido anterior específico desta espécie
         if (config.abortController) config.abortController.abort();
         config.abortController = new AbortController();
         const signal = config.abortController.signal;
@@ -411,37 +373,64 @@
           if (config.period !== "hist") url += `&scenario=${config.scenario}`;
 
           const overlayInfoResp = await fetch(url, { signal });
-          if (!overlayInfoResp.ok) throw new Error(`Sem ficheiro modelo para esta seleção.`);
+          if (!overlayInfoResp.ok) throw new Error(`Sem modelo para esta seleção.`);
           const overlayInfo = await overlayInfoResp.json();
 
           const cacheBuster = `cb=${Date.now()}`;
           const tileUrl = `${API_URL}${overlayInfo.tile_url}&${cacheBuster}`;
 
-          // Se a espécie já tem um layer, removemo-lo
           if (config.layer) map.removeLayer(config.layer);
 
-          // Criar novo layer. Como as API já enviam lat/lons corretas:
-          currentZIndex++; // A última layer mexida passa para o topo
+          currentZIndex++;
           config.layer = L.imageOverlay(tileUrl, overlayInfo.bounds, {
             opacity: 0.7,
             zIndex: currentZIndex
           }).addTo(map);
 
-          // Apenas fazer fitBounds se for a primeira vez (para não irritar o utilizador)
-          if (Object.keys(activeSpeciesConfigs).length === 1 && !config.hasZoomed) {
+          if (Object.keys(activeSpeciesConfigs).length === 1 && !config.hasZoomed && activeMunicipalities.length === 0) {
              map.fitBounds(overlayInfo.bounds);
              config.hasZoomed = true;
           }
 
           rasterLegend.update();
 
-          // Atualizar Estatísticas (Opcional)
+          // Tentar buscar estatísticas adicionais
           let statsUrl = `${API_URL}/raster/stats/${encodedSpecies}?period=${config.period}&binary=${config.binary}`;
           if (config.period !== "hist") statsUrl += `&scenario=${config.scenario}`;
           
-          fetch(statsUrl, { signal }).then(r => r.json()).then(stats => {
-             infoDiv.innerHTML = `Píxeis ativos: <strong>${stats.stats.count.toLocaleString()}</strong>`;
-          }).catch(() => { infoDiv.textContent = "Estatísticas indisponíveis"; });
+          let areaUrl = `${API_URL}/raster/suitable-area/${encodedSpecies}?period=${config.period}`;
+          if (config.period !== "hist") areaUrl += `&scenario=${config.scenario}`;
+
+          const [statsResponse, areaResponse, summaryResponse] = await Promise.all([
+            fetch(statsUrl, { signal }).catch(() => null),
+            fetch(areaUrl, { signal }).catch(() => null),
+            fetch(`${API_URL}/raster/summary/${encodedSpecies}`, { signal }).catch(() => null)
+          ]);
+
+          let areaInfo = '';
+          if (areaResponse && areaResponse.ok) {
+            const areaData = await areaResponse.json();
+            if (areaData.data && areaData.data.suitable_area_km2 !== undefined) {
+              areaInfo = `${areaData.data.suitable_area_km2.toLocaleString()} km² adequados`;
+            }
+          }
+
+          let extraInfo = '';
+          if (summaryResponse && summaryResponse.ok) {
+            const summaryData = await summaryResponse.json();
+            const trend = summaryData.scenario_analysis?.summary?.trend;
+            if (trend) {
+              const trendIcon = trend === 'expansão' ? '↗️' : (trend === 'contração' ? '↘️' : '➡️');
+              extraInfo = `<br>Tendência: ${trendIcon} <strong>${trend}</strong>`;
+            }
+          }
+
+          if (statsResponse && statsResponse.ok) {
+            const stats = await statsResponse.json();
+            infoDiv.innerHTML = `Píxeis ativos: <strong>${stats.stats.count.toLocaleString()}</strong><br>${areaInfo}${extraInfo}`;
+          } else {
+            infoDiv.innerHTML = `Camada desenhada. Estatísticas indisponíveis.`;
+          }
 
         } catch (error) {
           if (error.name === "AbortError") return;
@@ -452,9 +441,62 @@
       }
 
       // =====================================================
-      // LOADERS INICIAIS
+      // LEGENDA DO RASTER (MULTI-ESPÉCIES)
       // =====================================================
+      const COLORMAP_STOPS = {
+        "Greens5": ["#edf8e9", "#bae4b3", "#74c476", "#31a354", "#006d2c"],
+        "YlOrRd":  ["#ffffcc", "#fed976", "#fd8d3c", "#e31a1c", "#800026"],
+        "Greens":  ["#edf8e9", "#bae4b3", "#74c476", "#31a354", "#006d2c"],
+        "Blues":   ["#eff3ff", "#bdd7e7", "#6baed6", "#3182bd", "#08519c"],
+        "RdPu":    ["#feebe2", "#fbb4b9", "#f768a1", "#ae017e", "#49006a"],
+      };
 
+      const rasterLegend = L.control({ position: "bottomright" });
+      rasterLegend.onAdd = function () {
+        this._div = L.DomUtil.create("div", "raster-legend");
+        this._div.style.display = "none";
+        return this._div;
+      };
+      
+      rasterLegend.update = function () {
+        const activeKeys = Object.keys(activeSpeciesConfigs);
+        if (activeKeys.length === 0) {
+          this._div.style.display = "none";
+          return;
+        }
+
+        let html = `<h4>Legenda (SDM)</h4>`;
+        
+        activeKeys.forEach(species => {
+          const config = activeSpeciesConfigs[species];
+          const stops = COLORMAP_STOPS[config.colormap] || COLORMAP_STOPS["Greens5"];
+          const darkestColor = stops[stops.length - 1];
+
+          html += `<div class="legend-item"><span class="legend-sp-name">${species.replace(/_/g, " ")}</span>`;
+          
+          if (config.binary) {
+            html += `
+              <div class="legend-binary">
+                <div class="legend-swatch" style="background:${darkestColor}; opacity:0.8;"></div>
+                <span>Presença</span>
+              </div>`;
+          } else {
+            const gradient = `linear-gradient(to right, ${stops.join(", ")})`;
+            html += `
+              <div class="legend-gradient" style="background:${gradient};"></div>
+              <div class="legend-labels"><span>Ausência</span><span>Alta</span></div>`;
+          }
+          html += `</div>`;
+        });
+
+        this._div.innerHTML = html;
+        this._div.style.display = "block";
+      };
+      rasterLegend.addTo(map);
+
+      // =====================================================
+      // CARREGAMENTO DE DADOS INICIAIS
+      // =====================================================
       async function loadRecords() {
         const response = await fetch(`${API_URL}/records`);
         records = await response.json();
@@ -469,15 +511,12 @@
         speciesList.forEach((species) => {
           const label = document.createElement("label");
           label.className = "multiselect-option";
-          label.innerHTML = `
-            <input type="checkbox" value="${species}" onchange="handleSpeciesCheckbox(this)">
-            ${species.replace(/_/g, " ")}
-          `;
+          label.innerHTML = `<input type="checkbox" value="${species}" onchange="handleSpeciesCheckbox(this)"> ${species.replace(/_/g, " ")}`;
           optionsContainer.appendChild(label);
         });
       }
 
-const TODOS_MUNICIPIOS = [
+      const TODOS_MUNICIPIOS = [
         "Abrantes","Águeda","Aguiar da Beira","Alandroal","Albergaria-a-Velha","Albufeira","Alcácer do Sal","Alcanena","Alcobaça","Alcochete","Alcoutim","Alenquer","Alfândega da Fé","Alijó","Aljezur","Aljustrel","Almada","Almeida","Almeirim","Almodôvar","Alpiarça","Alter do Chão","Alvaiázere","Alvito","Amadora","Amarante","Amares","Anadia","Angra do Heroísmo","Ansião","Arcos de Valdevez","Arganil","Armamar","Arouca","Arraiolos","Arronches","Arruda dos Vinhos","Aveiro","Avis","Azambuja",
         "Baião","Barcelos","Barrancos","Barreiro","Batalha","Beja","Belmonte","Benavente","Bombarral","Borba","Boticas","Braga","Bragança","Cabeceiras de Basto","Cadaval","Caldas da Rainha","Câmara de Lobos","Caminha","Cantanhede","Carregal do Sal","Cartaxo","Cascais","Castanheira de Pêra","Castelo Branco","Castelo de Paiva","Castelo de Vide","Castro Daire","Castro Marim","Castro Verde","Celorico da Beira","Celorico de Basto","Chamusca","Chaves","Cinfães","Coimbra","Condeixa-a-Nova","Constância","Coruche","Covilhã","Crato","Cuba",
         "Elvas","Entroncamento","Espinho","Esposende","Estarreja","Estremoz","Évora","Fafe","Faro","Felgueiras","Ferreira do Alentejo","Ferreira do Zêzere","Figueira da Foz","Figueira de Castelo Rodrigo","Figueiró dos Vinhos","Fornos de Algodres","Freixo de Espada à Cinta","Fronteira","Funchal","Fundão",
@@ -488,27 +527,21 @@ const TODOS_MUNICIPIOS = [
       ].sort((a, b) => a.localeCompare(b, "pt"));
 
       async function loadMunicipalities() {
-        const select = document.getElementById("municipalityFilter");
-        select.innerHTML = '<option value="">Todos os municípios</option>';
+        const optionsContainer = document.getElementById("muniOptions");
         TODOS_MUNICIPIOS.forEach((nome) => {
-          const option = document.createElement("option");
-          option.value = nome;
-          option.textContent = nome;
-          select.appendChild(option);
+          const label = document.createElement("label");
+          label.className = "multiselect-option";
+          label.innerHTML = `<input type="checkbox" value="${nome}" onchange="handleMuniCheckbox(this)"> ${nome}`;
+          optionsContainer.appendChild(label);
         });
       }
 
-      // =====================================================
-      // MARCADORES (PONTOS GPS HISTÓRICOS)
-      // =====================================================
-
       function filterPoints() {
         const activeSpeciesList = Object.keys(activeSpeciesConfigs);
-        const selectedMunicipality = document.getElementById("municipalityFilter").value;
         
         const filteredRecords = records.filter((record) => {
           const speciesMatch = activeSpeciesList.length === 0 || activeSpeciesList.includes(record.species.replace(/_/g, " "));
-          const municipalityMatch = !selectedMunicipality || record.municipality === selectedMunicipality;
+          const municipalityMatch = activeMunicipalities.length === 0 || activeMunicipalities.includes(record.municipality);
           return speciesMatch && municipalityMatch;
         });
         
@@ -516,51 +549,32 @@ const TODOS_MUNICIPIOS = [
         markers = [];
         filteredRecords.forEach((record) => {
           const marker = L.marker([record.latitude, record.longitude]).addTo(map)
-            .bindPopup(`<strong>${record.species.replace(/_/g, " ")}</strong><br>Município: ${record.municipality}<br>Data: ${record.date}<br>Fonte: ${record.source}`);
+            .bindPopup(`<strong>${record.species}</strong><br>Município: ${record.municipality}<br>Data: ${record.date}<br>Fonte: ${record.source}`);
           markers.push(marker);
         });
       }
 
-      document.getElementById("municipalityFilter").addEventListener("change", async (e) => {
-        filterPoints();
-        await highlightMunicipality(e.target.value);
-      });
-
       // =====================================================
-      // INDICADORES E GRÁFICOS (Ignorados no Multi-select p/ agilizar)
+      // INDICADORES, GRÁFICOS E RELATÓRIOS
       // =====================================================
-
       async function loadSummary() {
         const response = await fetch(`${API_URL}/summary`);
         const summary = await response.json();
-        
         let hotspotLines = "<li>Nenhum hotspot definido.</li>";
         if (summary.hotspots && summary.hotspots.length > 0) {
           hotspotLines = summary.hotspots.map((h) => `<li>${h.municipality}: ${h.records} registos</li>`).join("");
         }
 
         document.getElementById("summary").innerHTML = `
-          <div class="metric"><strong>Total de registos (Pontos):</strong><br>${summary.total_records}</div>
+          <div class="metric"><strong>Total de registos:</strong><br>${summary.total_records}</div>
           <div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}</div>
         `;
       }
 
-      // =====================================================
-      // RELATÓRIOS (Fallback desativado até suportar arrays de espécies na API)
-      // =====================================================
+      document.getElementById("templateButton").addEventListener("click", () => alert("A exportação do relatório precisa de ser atualizada no backend para suportar múltiplas espécies."));
+      document.getElementById("reportButton").addEventListener("click", () => alert("O relatório IA precisa de ser atualizado no backend para suportar múltiplas espécies."));
 
-      document.getElementById("templateButton").addEventListener("click", () => alert("Para suportar múltiplas espécies num PDF, a API precisa de ser adaptada."));
-      document.getElementById("reportButton").addEventListener("click", () => alert("A API precisa de ler 'array de espécies' em vez de string simples."));
-
-      // Fechar a dropdown ao clicar fora
-      document.addEventListener("click", (evt) => {
-        const dropdown = document.querySelector(".custom-multiselect");
-        if (!dropdown.contains(evt.target)) {
-          document.getElementById("speciesOptions").hidden = true;
-        }
-      });
-
-      // INÍCIO
+      // Inicia a aplicação
       loadRecords();
       loadSpecies();
       loadMunicipalities();

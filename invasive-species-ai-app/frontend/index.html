@@ -76,6 +76,17 @@
           <option value="false">Contínuo (probabilidade)</option>
         </select>
 
+        <div id="colormapContainer" hidden>
+          <label>Paleta de Cores</label>
+          <select id="colormapFilter">
+            <option value="Greens5" selected>Greens5 (Verdes)</option>
+            <option value="YlOrRd">YlOrRd (Amarelo-Vermelho)</option>
+            <option value="Greens">Greens</option>
+            <option value="Blues">Blues</option>
+            <option value="RdPu">RdPu (Rosa-Púrpura)</option>
+          </select>
+        </div>
+
         <div id="rasterInfo" class="raster-info"></div>
       </div>
 
@@ -202,6 +213,10 @@
         triggerRasterUpdate();
       });
 
+      document.getElementById("colormapFilter").addEventListener("change", (e) => {
+        triggerRasterUpdate();
+      });
+
       function triggerRasterUpdate() {
         const selectedSpecies = document.getElementById("speciesFilter").value;
         if (selectedSpecies) {
@@ -259,6 +274,8 @@
       async function showRasterLayer(species) {
         console.log(`[raster] showRasterLayer species=${species} period=${currentPeriod} scenario=${currentScenario}`);
 
+        document.getElementById("colormapContainer").hidden = currentBinary;
+
         // Remover camada antiga imediatamente para dar feedback visual
         if (currentRasterLayer) {
           map.removeLayer(currentRasterLayer);
@@ -274,9 +291,10 @@
 
         try {
           const encodedSpecies = encodeURIComponent(species);
+          const colormap = document.getElementById("colormapFilter").value;
 
           // Construir URL com período e cenário (cenário só para períodos futuros)
-          let overlayInfoUrl = `${API_URL}/raster/overlay-info/${encodedSpecies}?period=${currentPeriod}&colormap=Greens5&binary=${currentBinary}`;
+          let overlayInfoUrl = `${API_URL}/raster/overlay-info/${encodedSpecies}?period=${currentPeriod}&colormap=${colormap}&binary=${currentBinary}`;
           if (currentPeriod !== "hist") {
             overlayInfoUrl += `&scenario=${currentScenario}`;
           }
@@ -304,22 +322,54 @@
 
           map.fitBounds(overlayInfo.bounds);
 
-          // Atualizar info text com estatísticas
-          let statsUrl = `${API_URL}/raster/stats/${encodedSpecies}?period=${currentPeriod}`;
+          // Atualizar info text com estatísticas (área e resumo)
+          let areaUrl = `${API_URL}/raster/suitable-area/${encodedSpecies}?period=${currentPeriod}`;
           if (currentPeriod !== "hist") {
-            statsUrl += `&scenario=${currentScenario}`;
+            areaUrl += `&scenario=${currentScenario}`;
           }
 
-          const statsResponse = await fetch(statsUrl, { signal });
-          if (statsResponse.ok && currentRasterFetchId === myFetchId) {
-            const rasterStats = await statsResponse.json();
+          const [areaResponse, summaryResponse] = await Promise.all([
+            fetch(areaUrl, { signal }).catch(() => null),
+            fetch(`${API_URL}/raster/summary/${encodedSpecies}`, { signal }).catch(() => null)
+          ]);
+
+          if (currentRasterFetchId === myFetchId) {
+            let areaInfo = 'Área não disponível';
+            if (areaResponse && areaResponse.ok) {
+              const areaData = await areaResponse.json();
+              if (areaData.data && areaData.data.suitable_area_km2 !== undefined) {
+                areaInfo = `${areaData.data.suitable_area_km2.toLocaleString()} km² adequados (${areaData.data.suitable_pct}%)`;
+              }
+            }
+
+            let extraInfo = '';
+            if (summaryResponse && summaryResponse.ok) {
+              const summaryData = await summaryResponse.json();
+              const trend = summaryData.scenario_analysis?.summary?.trend;
+              if (trend) {
+                const trendIcon = trend === 'expansão' ? '↗️' : (trend === 'contração' ? '↘️' : '➡️');
+                extraInfo = `<br>Tendência (futuro): ${trendIcon} <strong>${trend}</strong>`;
+              }
+              
+              if (currentPeriod !== "hist" && summaryData.temporal_comparison?.changes) {
+                const changes = summaryData.temporal_comparison.changes;
+                const changeKey = currentPeriod === "2041-2070" ? "hist_to_2041_2070_pct" : "hist_to_2071_2100_pct";
+                const changeVal = changes[changeKey];
+                if (changeVal !== undefined) {
+                  const signal = changeVal > 0 ? '+' : '';
+                  extraInfo += `<br>Variação face a histórico: ${signal}${changeVal}%`;
+                }
+              }
+            }
+
             const info = document.getElementById("rasterInfo");
             const periodText = currentPeriod === "hist" ? "Histórico" : `Futuro (${currentPeriod})`;
             const scenarioText = currentPeriod !== "hist" ? ` | Cenário: ${currentScenario.toUpperCase()}` : "";
             info.innerHTML = `
               <strong>${species}</strong><br>
               Período: ${periodText}${scenarioText}<br>
-              Píxeis ativos: ${rasterStats.stats.count}
+              ${areaInfo}
+              ${extraInfo}
             `;
           }
 

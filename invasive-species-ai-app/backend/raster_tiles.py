@@ -1,7 +1,7 @@
 """
 Endpoints para servir rasters SDM como imagens PNG com bounds para o Leaflet.
 Adiciona ao main.py com: from raster_tiles import router as tiles_router
-                          app.include_router(tiles_router)
+                         app.include_router(tiles_router)
 """
 
 from pathlib import Path
@@ -35,15 +35,18 @@ STATIC_DIR = Path(__file__).parent / "static"
 TILES_DIR = STATIC_DIR / "tiles"
 TILES_INDEX_PATH = STATIC_DIR / "tiles_index.json"
 
+# Dicionário de cores movido para o nível global para ser usado por rasters contínuos e binários
+COLORMAPS = {
+    "Greens5": [(237, 248, 233), (186, 228, 179), (116, 196, 120), (49,  163, 84), (0,   109, 44)],
+    "YlOrRd":  [(255, 255, 204), (254, 217, 142), (254, 153, 41),  (240, 59,  32), (189, 0,   38)],
+    "Greens":  [(237, 248, 233), (186, 228, 179), (116, 196, 118), (49,  163, 84), (0,   109, 44)],
+    "Blues":   [(239, 243, 255), (189, 215, 231), (107, 174, 214), (49,  130, 189), (8,   81,  156)],
+    "RdPu":    [(253, 224, 221), (251, 180, 185), (247, 104, 161), (174, 1,   126), (73,  0,   106)],
+}
 
 def _compute_bounds_from_transform(transform, width, height) -> dict:
-    """
-    Calcula os limites geográficos exatos baseados na transformação de saída.
-    Isto garante que o canto superior esquerdo e inferior direito batem certo com os píxeis.
-    """
     west, north = transform * (0, 0)
     east, south = transform * (width, height)
-
     return {
         "south": round(float(south), 6),
         "west": round(float(west), 6),
@@ -51,18 +54,11 @@ def _compute_bounds_from_transform(transform, width, height) -> dict:
         "east": round(float(east), 6),
     }
 
-
 def _raster_to_png_overlay(filepath: str, colormap: str = "Greens5") -> tuple[bytes, dict]:
     if not RASTERIO_OK or not PIL_OK:
         raise RuntimeError("rasterio ou Pillow não estão instalados")
 
     with rasterio.open(filepath) as src:
-        # ----------------------------------------------------------------
-        # CORREÇÃO: Detectar se é binário ANTES de reprojectar.
-        # O resampling bilinear interpola os valores 0/1 para floats
-        # intermédios (ex: 0.4521), fazendo com que o raster binário
-        # seja erroneamente tratado como contínuo.
-        # ----------------------------------------------------------------
         nodata_val = src.nodata if src.nodata is not None else -9999
         raw_sample = src.read(1)
         raw_valid = raw_sample[raw_sample != nodata_val]
@@ -74,13 +70,10 @@ def _raster_to_png_overlay(filepath: str, colormap: str = "Greens5") -> tuple[by
         web_mercator_crs = CRS.from_epsg(3857)
         wgs84_crs = CRS.from_epsg(4326)
 
-        # 1. Calcular a transformação nativa para Web Mercator
         transform_3857, width, height = calculate_default_transform(
             src.crs, web_mercator_crs, src.width, src.height, *src.bounds
         )
 
-        # 2. Reprojectar — nearest para binários (evita artefactos nas bordas),
-        #    bilinear para contínuos (suaviza e alinha melhor feições de costa)
         data_web = np.zeros((height, width), dtype=np.float32)
 
         reproject(
@@ -95,7 +88,6 @@ def _raster_to_png_overlay(filepath: str, colormap: str = "Greens5") -> tuple[by
             dst_nodata=nodata_val,
         )
 
-        # 3. Calcular bounds finais em WGS84
         west_m, north_m = transform_3857 * (0, 0)
         east_m, south_m = transform_3857 * (width, height)
 
@@ -110,7 +102,6 @@ def _raster_to_png_overlay(filepath: str, colormap: str = "Greens5") -> tuple[by
             "east": round(float(east), 6),
         }
 
-        # 4. Máscara e cores
         mask = (data_web != nodata_val) & np.isfinite(data_web)
         valid = data_web[mask]
         if len(valid) == 0:
@@ -119,16 +110,18 @@ def _raster_to_png_overlay(filepath: str, colormap: str = "Greens5") -> tuple[by
         if is_binary:
             rgba = np.zeros((data_web.shape[0], data_web.shape[1], 4), dtype=np.uint8)
             hits = (data_web == 1) & mask
-            rgba[hits, 0] = 45
-            rgba[hits, 1] = 106
-            rgba[hits, 2] = 79
+            # CORREÇÃO: Vai buscar a cor mais escura da paleta escolhida (o último elemento do array)
+            colors_list = COLORMAPS.get(colormap, COLORMAPS["Greens5"])
+            base_color = colors_list[-1]
+            rgba[hits, 0] = base_color[0]
+            rgba[hits, 1] = base_color[1]
+            rgba[hits, 2] = base_color[2]
             rgba[hits, 3] = 200
         else:
             vmin, vmax = float(valid.min()), float(valid.max())
             normalized = np.zeros_like(data_web) if vmax == vmin else np.clip((data_web - vmin) / (vmax - vmin), 0, 1)
             rgba = _apply_colormap(normalized, mask, colormap)
 
-        # Converter para imagem PNG
         img = Image.fromarray(rgba, mode="RGBA")
 
         max_dim = 1024
@@ -173,8 +166,6 @@ def _ensure_cached(filepath: str, colormap: str) -> dict:
     entry = index.get(key)
 
     if png_path.exists() and entry:
-        # Verificar se os bounds em cache estão em WGS84 (graus)
-        # Bounds em metros têm valores absolutos >> 180, impossível em graus
         cached_bounds = entry.get("bounds", {})
         bounds_ok = (
             cached_bounds
@@ -185,7 +176,7 @@ def _ensure_cached(filepath: str, colormap: str) -> dict:
         )
         if bounds_ok:
             return entry
-        # Bounds corrompidos (em metros) — recalcular em WGS84
+            
         try:
             web_mercator_crs = CRS.from_epsg(3857)
             wgs84_crs = CRS.from_epsg(4326)
@@ -227,51 +218,8 @@ def _ensure_cached(filepath: str, colormap: str) -> dict:
 
 
 def _apply_colormap(normalized: np.ndarray, mask: np.ndarray, colormap: str) -> np.ndarray:
-    """
-    Aplica colormap manual a array normalizado [0,1].
-    Retorna array RGBA uint8.
-    """
     h, w = normalized.shape
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
-
-    COLORMAPS = {
-        # 5 classes de verde claro a escuro (usado por defeito nos contínuos)
-        "Greens5": [
-            (237, 248, 233),   # 0.0–0.2  verde muito claro  #edf8e9
-            (186, 228, 179),   # 0.2–0.4  verde claro        #bae4b3
-            (116, 196, 120),   # 0.4–0.6  verde médio        #74c476
-            (49,  163, 84),    # 0.6–0.8  verde escuro       #31a354
-            (0,   109, 44),    # 0.8–1.0  verde muito escuro #006d2c
-        ],
-        "YlOrRd": [
-            (255, 255, 204),
-            (254, 217, 142),
-            (254, 153, 41),
-            (240, 59,  32),
-            (189, 0,   38),
-        ],
-        "Greens": [
-            (237, 248, 233),
-            (186, 228, 179),
-            (116, 196, 118),
-            (49,  163, 84),
-            (0,   109, 44),
-        ],
-        "Blues": [
-            (239, 243, 255),
-            (189, 215, 231),
-            (107, 174, 214),
-            (49,  130, 189),
-            (8,   81,  156),
-        ],
-        "RdPu": [
-            (253, 224, 221),
-            (251, 180, 185),
-            (247, 104, 161),
-            (174, 1,   126),
-            (73,  0,   106),
-        ],
-    }
 
     colors = COLORMAPS.get(colormap, COLORMAPS["Greens5"])
     n = len(colors) - 1
@@ -315,18 +263,6 @@ def get_raster_tile(
     colormap: str = "Greens5",
     binary: bool = True,
 ):
-    """
-    Devolve um raster SDM como imagem PNG para overlay no Leaflet.
-
-    Parâmetros:
-        - species: Nome científico (ex: Ailanthus_altissima)
-        - period: hist | 2041-2070 | 2071-2100
-        - scenario: ssp126 | ssp370 | ssp585 (não usado em hist)
-        - colormap: Greens5 | YlOrRd | Greens | Blues | RdPu
-        - binary: True = raster binário (0/1) | False = raster contínuo (0.0-1.0)
-
-    Resposta: imagem PNG (usa junto com /raster/bounds/{species})
-    """
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=binary)
     if not files:
         files = get_raster_files(species=species, period=period, scenario=scenario)
@@ -350,11 +286,6 @@ def get_raster_bounds(
     period: str = "hist",
     scenario: str = None,
 ):
-    """
-    Devolve os bounds geográficos (WGS84) de um raster para posicionar o overlay no Leaflet.
-
-    Retorna: { south, west, north, east }
-    """
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
     if not files:
         files = get_raster_files(species=species, period=period, scenario=scenario)

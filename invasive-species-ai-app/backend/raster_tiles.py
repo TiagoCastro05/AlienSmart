@@ -111,7 +111,7 @@ def _raster_to_png_overlay(filepath: str, colormap: str = "Greens5") -> tuple[by
         }
 
         # 4. Máscara e cores
-        mask = data_web != nodata_val
+        mask = (data_web != nodata_val) & np.isfinite(data_web)
         valid = data_web[mask]
         if len(valid) == 0:
             raise ValueError("Raster sem dados válidos")
@@ -415,4 +415,5 @@ def get_overlay_info(
             "binary": binary,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        raise HTTPException(status_code=500, detail=traceback.format_exc())

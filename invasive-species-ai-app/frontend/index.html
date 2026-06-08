@@ -9,29 +9,6 @@
     <!-- 1º OBRIGATÓRIO: Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
-    <!-- 2º OBRIGATÓRIO: Proj4 -->
-    <script src="https://unpkg.com/proj4"></script>
-
-    <!-- 2.5º CONFIGURAÇÃO DO PROJ4 -->
-    <script>
-      // Garantir que está global
-      window.proj4 = proj4;
-      
-      // EPSG:3035 (A projeção usada na Europa para grelhas estatísticas)
-      const proj3035 = "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs";
-      proj4.defs("EPSG:3035", proj3035);
-      proj4.defs("3035", proj3035); 
-
-      // EPSG:6933 (Projeção Global Equal-Area - A TUA PROJEÇÃO REAL)
-      const proj6933 = "+proj=cea +lon_0=0 +lat_ts=30 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs";
-      proj4.defs("EPSG:6933", proj6933);
-      proj4.defs("6933", proj6933);
-    </script>
-
-    <!-- 3º GeoRaster e o Plugin -->
-    <script src="https://unpkg.com/georaster"></script>
-    <script src="https://unpkg.com/georaster-layer-for-leaflet"></script>
-    
     <!-- Gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     
@@ -56,9 +33,6 @@
       .raster-controls label { font-size: 13px; color: #333; margin-top: 8px; }
       .raster-controls select { padding: 6px; margin-bottom: 4px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
       .raster-info { background: #e8f5e9; padding: 8px; border-radius: 4px; margin-top: 12px; font-size: 12px; color: #2d6a4f; }
-      
-      /* Estilo da Legenda do Raster */
-      .raster-legend { background: white; padding: 10px 14px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.25); border: 1px solid #ddd; }
     </style>
   </head>
   <body>
@@ -139,26 +113,66 @@
       let currentRasterFetchId = 0;
       let currentRasterAbortController = null;
 
-      // =====================================================
-      // LEGENDA DO RASTER NO MAPA
-      // =====================================================
-      const rasterLegend = L.control({ position: "bottomright" });
-      rasterLegend.onAdd = function () {
-        const div = L.DomUtil.create("div", "raster-legend");
-        div.innerHTML = `
-          <h4 style="margin: 0 0 6px 0; font-size: 13px; color: #1b4332;">Adequabilidade / Presença</h4>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 11px; font-weight: bold; color: #555;">0</span>
-            <div style="width: 130px; height: 14px; background: linear-gradient(to right, rgba(237,248,233,0.5), #bae4b3, #74c476, #31a354, #006d2c); border: 1px solid #aaa; border-radius: 3px;"></div>
-            <span style="font-size: 11px; font-weight: bold; color: #555;">1</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; font-size: 10px; color: #777; margin-top: 4px;">
-            <span>Baixa/Ausência</span>
-            <span>Alta/Presença</span>
-          </div>
-        `;
-        return div;
-      };
+      // GeoJSON dos municípios — CAOP, WGS84, campo "Concelho" em maiúsculas
+      const MUNICIPIOS_GEOJSON_URL = "https://raw.githubusercontent.com/nmota/caop_GeoJSON/master/Portugal_Municipalities.geojson";
+      let municipiosGeoJSON = null;
+      let municipioHighlightLayer = null;
+
+      async function loadMunicipiosGeoJSON() {
+        if (municipiosGeoJSON) return municipiosGeoJSON;
+        try {
+          const resp = await fetch(MUNICIPIOS_GEOJSON_URL);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          municipiosGeoJSON = await resp.json();
+          console.log(`[municipios] Carregados ${municipiosGeoJSON.features.length} municípios`);
+        } catch (e) {
+          console.error("[municipios] Erro:", e);
+        }
+        return municipiosGeoJSON;
+      }
+
+
+      async function highlightMunicipality(municipalityName) {
+        if (municipioHighlightLayer) {
+          map.removeLayer(municipioHighlightLayer);
+          municipioHighlightLayer = null;
+        }
+        if (!municipalityName) return;
+
+        try {
+          const geojson = await loadMunicipiosGeoJSON();
+          if (!geojson) return;
+
+          // Normalizar para comparação (ignora maiúsculas e acentos)
+          const norm = s => s.toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+          const procurado = norm(municipalityName);
+
+          // Campo "Concelho" no GeoJSON da CAOP está em maiúsculas
+          const feature = geojson.features.find(f =>
+            norm(f.properties.Concelho || "") === procurado
+          );
+
+          if (!feature || !feature.geometry) {
+            console.warn("Município não encontrado:", municipalityName);
+            return;
+          }
+
+          municipioHighlightLayer = L.geoJSON(feature, {
+            style: {
+              color: "#cc0000",
+              weight: 3,
+              fillColor: "#ff4444",
+              fillOpacity: 0.15,
+              dashArray: "6 3",
+            }
+          }).addTo(map);
+
+          map.fitBounds(municipioHighlightLayer.getBounds(), { padding: [40, 40] });
+
+        } catch (e) {
+          console.error("Erro ao highlight município:", e);
+        }
+      }
 
       // =====================================================
       // EVENTOS DOS FILTROS DE RASTER
@@ -205,14 +219,23 @@
         });
       }
 
+      // Lista completa dos 308 municípios de Portugal
+      const TODOS_MUNICIPIOS = [
+        "Abrantes","Águeda","Aguiar da Beira","Alandroal","Albergaria-a-Velha","Albufeira","Alcácer do Sal","Alcanena","Alcobaça","Alcochete","Alcoutim","Alenquer","Alfândega da Fé","Alijó","Aljezur","Aljustrel","Almada","Almeida","Almeirim","Almodôvar","Alpiarça","Alter do Chão","Alvaiázere","Alvito","Amadora","Amarante","Amares","Anadia","Angra do Heroísmo","Ansião","Arcos de Valdevez","Arganil","Armamar","Arouca","Arraiolos","Arronches","Arruda dos Vinhos","Aveiro","Avis","Azambuja",
+        "Baião","Barcelos","Barrancos","Barreiro","Batalha","Beja","Belmonte","Benavente","Bombarral","Borba","Boticas","Braga","Bragança","Cabeceiras de Basto","Cadaval","Caldas da Rainha","Câmara de Lobos","Caminha","Cantanhede","Carregal do Sal","Cartaxo","Cascais","Castanheira de Pêra","Castelo Branco","Castelo de Paiva","Castelo de Vide","Castro Daire","Castro Marim","Castro Verde","Celorico da Beira","Celorico de Basto","Chamusca","Chaves","Cinfães","Coimbra","Condeixa-a-Nova","Constância","Coruche","Covilhã","Crato","Cuba",
+        "Elvas","Entroncamento","Espinho","Esposende","Estarreja","Estremoz","Évora","Fafe","Faro","Felgueiras","Ferreira do Alentejo","Ferreira do Zêzere","Figueira da Foz","Figueira de Castelo Rodrigo","Figueiró dos Vinhos","Fornos de Algodres","Freixo de Espada à Cinta","Fronteira","Funchal","Fundão",
+        "Gavião","Góis","Golegã","Gondomar","Gouveia","Grândola","Guarda","Guimarães","Horta","Idanha-a-Nova","Ílhavo","Lagoa","Lagos","Lamego","Leiria","Lisboa","Loulé","Loures","Lousã","Lousada","Mação","Macedo de Cavaleiros","Machico","Mafra","Maia","Mangualde","Manteigas","Marco de Canaveses","Marinha Grande","Marvão","Matosinhos","Mealhada","Mêda","Melgaço","Mesão Frio","Miranda do Corvo","Miranda do Douro","Mirandela","Mogadouro","Moimenta da Beira","Moita","Monção","Monchique","Mondim de Basto","Monforte","Montalegre","Montemor-o-Novo","Montemor-o-Velho","Montijo","Mora","Mortágua","Moura","Mourão","Murça","Murtosa",
+        "Nazaré","Nelas","Nisa","Nordeste","Óbidos","Odemira","Odivelas","Oeiras","Olhão","Oliveira de Azeméis","Oliveira de Frades","Oliveira do Bairro","Oliveira do Hospital","Ourém","Ourique","Ovar","Paços de Ferreira","Palmela","Pampilhosa da Serra","Paredes","Paredes de Coura","Pedrogão Grande","Penacova","Penafiel","Penalva do Castelo","Penamacor","Penedono","Penela","Peniche","Peso da Régua","Pinhel","Pombal","Ponte da Barca","Ponte de Lima","Ponte de Sor","Portalegre","Portel","Portimão","Porto","Porto de Mós","Porto Moniz","Porto Santo","Póvoa de Lanhoso","Póvoa de Varzim","Praia da Vitória",
+        "Proença-a-Nova","Resende","Ribeira Brava","Ribeira de Pena","Ribeira Grande","Rio Maior","Sabrosa","Sabugal","Salvaterra de Magos","Santa Comba Dão","Santa Cruz","Santa Cruz da Graciosa","Santa Cruz das Flores","Santa Maria da Feira","Santa Marta de Penaguião","Santarém","Santiago do Cacém","Santo Tirso","São Brás de Alportel","São João da Madeira","São João da Pesqueira","São Pedro do Sul","São Roque do Pico","São Vicente","Sardoal","Sátão","Seia","Seixal","Sernancelhe","Serpa","Sertã","Sesimbra","Setúbal","Sever do Vouga","Silves","Sines","Sintra","Sobral de Monte Agraço","Soure","Sousel",
+        "Tábua","Tabuaço","Tarouca","Tavira","Terras de Bouro","Tomar","Tondela","Torre de Moncorvo","Torres Novas","Torres Vedras","Trancoso","Trofa","Vagos","Vale de Cambra","Valença","Valongo","Valpaços","Vendas Novas","Viana do Alentejo","Viana do Castelo","Vidigueira","Vieira do Minho","Vila de Rei","Vila do Bispo","Vila do Conde","Vila do Porto","Vila Flor","Vila Franca de Xira","Vila Franca do Campo","Vila Nova da Barquinha","Vila Nova de Cerveira","Vila Nova de Famalicão","Vila Nova de Foz Côa","Vila Nova de Gaia","Vila Nova de Paiva","Vila Nova de Poiares","Vila Pouca de Aguiar","Vila Real","Vila Real de Santo António","Vila Velha de Ródão","Vila Verde","Vila Viçosa","Vimioso","Vinhais","Viseu","Vizela","Vouzela"
+      ].sort((a, b) => a.localeCompare(b, "pt"));
+
       async function loadMunicipalities() {
-        const response = await fetch(`${API_URL}/municipalities`);
-        const municipalitiesList = await response.json();
         const select = document.getElementById("municipalityFilter");
-        municipalitiesList.forEach((municipality) => {
+        TODOS_MUNICIPIOS.forEach((nome) => {
           const option = document.createElement("option");
-          option.value = municipality;
-          option.textContent = municipality;
+          option.value = nome;
+          option.textContent = nome;
           select.appendChild(option);
         });
       }
@@ -224,10 +247,9 @@
       async function showRasterLayer(species) {
         console.log(`[raster] showRasterLayer species=${species} period=${currentPeriod} scenario=${currentScenario}`);
 
-        // Remover camada e legenda antigas imediatamente para dar feedback visual
+        // Remover camada antiga imediatamente para dar feedback visual
         if (currentRasterLayer) {
           map.removeLayer(currentRasterLayer);
-          map.removeControl(rasterLegend);
           currentRasterLayer = null;
         }
 
@@ -267,9 +289,6 @@
           currentRasterLayer = L.imageOverlay(tileUrl, overlayInfo.bounds, {
             opacity: 0.7,
           }).addTo(map);
-
-          // Adicionar a Legenda ao mapa
-          rasterLegend.addTo(map);
 
           map.fitBounds(overlayInfo.bounds);
 
@@ -366,6 +385,10 @@
         });
       }
 
+      // =====================================================
+      // MARCADORES E FILTROS
+      // =====================================================
+
       function showMarkers(data) {
         markers.forEach((marker) => marker.remove());
         markers = [];
@@ -386,25 +409,31 @@
         });
         showMarkers(filteredRecords);
 
+        // Highlight do município selecionado
+        await highlightMunicipality(selectedMunicipality);
+
         if (selectedSpecies) {
           document.getElementById("rasterControls").hidden = false;
           await showRasterLayer(selectedSpecies);
         } else {
-          // Se o utilizador selecionar "Todas as espécies", cancelamos qualquer download.
+          // Limpar raster se "Todas as espécies" for selecionado
           currentRasterFetchId++;
-          if (currentRasterAbortController) {
-            currentRasterAbortController.abort();
-          }
+          if (currentRasterAbortController) currentRasterAbortController.abort();
           if (currentRasterLayer) {
             map.removeLayer(currentRasterLayer);
-            map.removeControl(rasterLegend);
             currentRasterLayer = null;
           }
           document.getElementById("rasterControls").hidden = true;
         }
       }
 
-      function filterByMunicipality() { filterBySpecies(); }
+      async function filterByMunicipality() {
+        await filterBySpecies();
+      }
+
+      // =====================================================
+      // RELATÓRIOS
+      // =====================================================
 
       async function generateTemplateReport() {
         document.getElementById("report").textContent = "A gerar relatório por template...";
@@ -445,13 +474,16 @@
         window.open(`${API_URL}/report/pdf?${params.toString()}`, "_blank");
       }
 
+      // =====================================================
+      // EVENT LISTENERS E ARRANQUE
+      // =====================================================
+
       document.getElementById("speciesFilter").addEventListener("change", filterBySpecies);
       document.getElementById("municipalityFilter").addEventListener("change", filterByMunicipality);
       document.getElementById("templateButton").addEventListener("click", generateTemplateReport);
       document.getElementById("reportButton").addEventListener("click", generateAIReport);
       document.getElementById("pdfButton").addEventListener("click", exportPdf);
 
-      // Inicia a aplicação
       loadRecords();
       loadSpecies();
       loadMunicipalities();

@@ -70,6 +70,12 @@
           </select>
         </div>
 
+        <label>Tipo de Raster</label>
+        <select id="binaryFilter">
+          <option value="true">Binário (presença/ausência)</option>
+          <option value="false">Contínuo (probabilidade)</option>
+        </select>
+
         <div id="rasterInfo" class="raster-info"></div>
       </div>
 
@@ -110,6 +116,7 @@
       let currentRasterLayer = null;
       let currentPeriod = "hist";
       let currentScenario = "ssp370";
+      let currentBinary = true;
       let currentRasterFetchId = 0;
       let currentRasterAbortController = null;
 
@@ -190,6 +197,11 @@
         triggerRasterUpdate();
       });
 
+      document.getElementById("binaryFilter").addEventListener("change", (e) => {
+        currentBinary = e.target.value === "true";
+        triggerRasterUpdate();
+      });
+
       function triggerRasterUpdate() {
         const selectedSpecies = document.getElementById("speciesFilter").value;
         if (selectedSpecies) {
@@ -264,7 +276,7 @@
           const encodedSpecies = encodeURIComponent(species);
 
           // Construir URL com período e cenário (cenário só para períodos futuros)
-          let overlayInfoUrl = `${API_URL}/raster/overlay-info/${encodedSpecies}?period=${currentPeriod}&colormap=Greens5`;
+          let overlayInfoUrl = `${API_URL}/raster/overlay-info/${encodedSpecies}?period=${currentPeriod}&colormap=Greens5&binary=${currentBinary}`;
           if (currentPeriod !== "hist") {
             overlayInfoUrl += `&scenario=${currentScenario}`;
           }

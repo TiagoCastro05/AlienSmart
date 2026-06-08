@@ -173,13 +173,37 @@ def _ensure_cached(filepath: str, colormap: str) -> dict:
     entry = index.get(key)
 
     if png_path.exists() and entry:
+        # Verificar se os bounds em cache estão em WGS84 (graus)
+        # Bounds em metros têm valores absolutos >> 180, impossível em graus
+        cached_bounds = entry.get("bounds", {})
+        bounds_ok = (
+            cached_bounds
+            and abs(cached_bounds.get("west", 9999)) <= 180
+            and abs(cached_bounds.get("east", 9999)) <= 180
+            and abs(cached_bounds.get("south", 9999)) <= 90
+            and abs(cached_bounds.get("north", 9999)) <= 90
+        )
+        if bounds_ok:
+            return entry
+        # Bounds corrompidos (em metros) — recalcular em WGS84
         try:
+            web_mercator_crs = CRS.from_epsg(3857)
+            wgs84_crs = CRS.from_epsg(4326)
             with rasterio.open(filepath) as src:
-                entry["bounds"] = _compute_bounds_from_transform(
-                    *calculate_default_transform(
-                        src.crs, CRS.from_epsg(3857), src.width, src.height, *src.bounds
-                    )
+                transform_3857, width, height = calculate_default_transform(
+                    src.crs, web_mercator_crs, src.width, src.height, *src.bounds
                 )
+            west_m, north_m = transform_3857 * (0, 0)
+            east_m, south_m = transform_3857 * (width, height)
+            transformer = Transformer.from_crs(web_mercator_crs, wgs84_crs, always_xy=True)
+            west, south = transformer.transform(west_m, south_m)
+            east, north = transformer.transform(east_m, north_m)
+            entry["bounds"] = {
+                "south": round(float(south), 6),
+                "west": round(float(west), 6),
+                "north": round(float(north), 6),
+                "east": round(float(east), 6),
+            }
             index[key] = entry
             _save_index(index)
         except Exception:
@@ -289,6 +313,7 @@ def get_raster_tile(
     period: str = "hist",
     scenario: str = None,
     colormap: str = "Greens5",
+    binary: bool = True,
 ):
     """
     Devolve um raster SDM como imagem PNG para overlay no Leaflet.
@@ -298,10 +323,11 @@ def get_raster_tile(
         - period: hist | 2041-2070 | 2071-2100
         - scenario: ssp126 | ssp370 | ssp585 (não usado em hist)
         - colormap: Greens5 | YlOrRd | Greens | Blues | RdPu
+        - binary: True = raster binário (0/1) | False = raster contínuo (0.0-1.0)
 
     Resposta: imagem PNG (usa junto com /raster/bounds/{species})
     """
-    files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
+    files = get_raster_files(species=species, period=period, scenario=scenario, binary=binary)
     if not files:
         files = get_raster_files(species=species, period=period, scenario=scenario)
     if not files:
@@ -357,8 +383,9 @@ def get_overlay_info(
     period: str = "hist",
     scenario: str = None,
     colormap: str = "Greens5",
+    binary: bool = True,
 ):
-    files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
+    files = get_raster_files(species=species, period=period, scenario=scenario, binary=binary)
     if not files:
         files = get_raster_files(species=species, period=period, scenario=scenario)
     if not files:
@@ -373,7 +400,8 @@ def get_overlay_info(
         east = entry["bounds"]["east"]
 
         scenario_param = f"&scenario={scenario}" if scenario else ""
-        tile_url = f"/raster/tile/{species}?period={period}{scenario_param}&colormap={colormap}"
+        binary_param = f"&binary={str(binary).lower()}"
+        tile_url = f"/raster/tile/{species}?period={period}{scenario_param}{binary_param}&colormap={colormap}"
 
         return {
             "tile_url": tile_url,
@@ -383,7 +411,8 @@ def get_overlay_info(
             ],
             "species": species,
             "period": period,
-            "scenario": scenario
+            "scenario": scenario,
+            "binary": binary,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

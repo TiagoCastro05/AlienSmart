@@ -6,7 +6,7 @@ const API_URL = "http://localhost:8000";
 
       let records = [];
       let markers = [];
-      let speciesChart, municipalityChart, speciesDistributionChart;
+      let speciesChart, municipalityChart, dashboardChart = null;
 
       // =====================================================
       // ESTADOS GLOBAIS MULTI-SELECT
@@ -510,19 +510,74 @@ async function loadMunicipalities() {
       // =====================================================
       // INDICADORES, GRÁFICOS E RELATÓRIOS
       // =====================================================
-      async function loadSummary() {
-        const response = await fetch(`${API_URL}/summary`);
-        const summary = await response.json();
-        let hotspotLines = "<li>Nenhum hotspot definido.</li>";
-        if (summary.hotspots && summary.hotspots.length > 0) {
-          hotspotLines = summary.hotspots.map((h) => `<li>${h.municipality}: ${h.records} registos</li>`).join("");
-        }
+async function loadSummary() {
+  document.getElementById("summary").innerHTML = `<div class="metric">A carregar indicadores...</div>`;
+  
+  try {
+    const resp = await fetch(`${API_URL}/dashboard-stats`);
+    const data = await resp.json();
 
-        document.getElementById("summary").innerHTML = `
-          <div class="metric"><strong>Total de registos:</strong><br>${summary.total_records}</div>
-          <div class="metric"><strong>Município dominante:</strong><br>${summary.most_common_municipality}</div>
-        `;
+    // Top 5 espécies
+    const top5SpHtml = data.top5_species.map((s, i) =>
+      `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;font-size:12px;">
+        <span>${i+1}. <em>${s.species}</em></span>
+        <span style="color:#2d6a4f;font-weight:bold;">${s.pixel_count.toLocaleString()} px</span>
+      </div>`
+    ).join("");
+
+    // Top 5 municípios
+    const top5MunHtml = data.top5_municipalities.map((m, i) =>
+      `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #eee;font-size:12px;">
+        <span>${i+1}. ${m.municipality}</span>
+        <span style="color:#1b4332;font-weight:bold;">${m.records} reg.</span>
+      </div>`
+    ).join("");
+
+    document.getElementById("summary").innerHTML = `
+      <div class="metric">
+        <strong>Total de espécies (rasters):</strong><br>
+        <span style="font-size:20px;font-weight:bold;color:#2d6a4f;">${data.total_raster_species}</span>
+      </div>
+      <div class="metric">
+        <strong>Total de registos de campo:</strong><br>
+        <span style="font-size:20px;font-weight:bold;color:#1b4332;">${data.total_records}</span>
+      </div>
+      <div class="metric">
+        <strong>Top 5 espécies (área SDM)</strong>
+        ${top5SpHtml}
+      </div>
+      <div class="metric">
+        <strong>Top 5 municípios (registos)</strong>
+        ${top5MunHtml}
+      </div>
+      <div class="metric">
+        <strong>Distribuição top 5 espécies</strong>
+        <canvas id="dashboardChart" style="max-height:200px;margin-top:8px;"></canvas>
+      </div>`;
+
+    // Gráfico pizza
+    if (dashboardChart) dashboardChart.destroy();
+    dashboardChart = new Chart(document.getElementById("dashboardChart"), {
+      type: "doughnut",
+      data: {
+        labels: data.top5_species.map(s => s.species),
+        datasets: [{
+          data: data.top5_species.map(s => s.pixel_count),
+          backgroundColor: ["#2d6a4f","#52b788","#95d5b2","#1b4332","#74c69d"],
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: "bottom", labels: { font: { size: 10 } } } }
       }
+    });
+
+  } catch (e) {
+    document.getElementById("summary").innerHTML = `<div class="metric" style="color:red;">Erro ao carregar indicadores.</div>`;
+    console.error(e);
+  }
+}
 
       document.getElementById("templateButton").addEventListener("click", () => alert("A exportação do relatório precisa de ser atualizada no backend para suportar múltiplas espécies."));
       document.getElementById("reportButton").addEventListener("click", () => alert("O relatório IA precisa de ser atualizado no backend para suportar múltiplas espécies."));

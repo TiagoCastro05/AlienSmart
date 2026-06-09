@@ -429,3 +429,30 @@ def get_raster_data_endpoint(species: str, period: str = "hist", max_samples: in
     if "error" in data:
         raise HTTPException(status_code=500, detail=data["error"])
     return data
+
+
+
+@app.get("/dashboard-stats")
+def get_dashboard_stats(species: list[str] = None):
+    from fastapi import Query
+    # Top 5 espécies por número de ficheiros raster históricos
+    all_raster_species = get_raster_species_list()
+    species_file_counts = {}
+    for sp in all_raster_species:
+        files = get_raster_files(species=sp, period="hist", binary=True)
+        if files:
+            species_file_counts[sp] = get_raster_stats(files[0]).get("count", 0)
+    
+    top5_species = sorted(species_file_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    # Top 5 municípios dos Records.json (filtrado por espécies se fornecidas)
+    records = load_records()
+    municipality_count = Counter(r["municipality"] for r in records)
+    top5_municipalities = municipality_count.most_common(5)
+
+    return {
+        "total_raster_species": len(all_raster_species),
+        "total_records": len(records),
+        "top5_species": [{"species": sp, "pixel_count": cnt} for sp, cnt in top5_species],
+        "top5_municipalities": [{"municipality": m, "records": c} for m, c in top5_municipalities],
+    }

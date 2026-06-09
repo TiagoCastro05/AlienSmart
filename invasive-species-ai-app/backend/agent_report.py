@@ -1,66 +1,50 @@
 from __future__ import annotations
-from collections import Counter
-from pathlib import Path
-import os
+
 import json
+import logging
+from collections import Counter
+
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_ollama import ChatOllama
-from langchain_openai import ChatOpenAI
+
+from services.observation_service import get_observations
 
 load_dotenv()
-DATA_FILE = Path(__file__).parent / "records.json"
 
-# Variáveis globais para armazenar os filtros
-_selected_species = None
-_selected_municipality = None
+logger = logging.getLogger(__name__)
+
+# Filtros globais — definidos por generate_agent_report antes de invocar o agente
+_selected_species: str | None = None
+_selected_municipality: str | None = None
 
 
-def load_records() -> list[dict]:
-    """Carrega os registos a partir do ficheiro JSON.
-    Retorna uma lista vazia se o ficheiro não existir ou estiver vazio.
-    """
-    if not DATA_FILE.exists():
-        return []
-    with open(DATA_FILE, "r", encoding="utf-8") as file:
-        records = json.load(file)
-        # Filtrar por espécie se selecionada
-        if _selected_species:
-            records = [r for r in records if r.get("species", "").lower() == _selected_species.lower()]
-        # Filtrar por município se selecionado
-        if _selected_municipality:
-            records = [r for r in records if r.get("municipality", "").lower() == _selected_municipality.lower()]
-        return records
+def _get_records() -> list[dict]:
+    return get_observations(species=_selected_species, municipality=_selected_municipality)
 
 
 def calculate_summary() -> dict:
-    """Calcula indicadores determinísticos para alimentar as ferramentas do agente."""
-    records = load_records()
+    records = _get_records()
     total = len(records)
-    species_count = Counter(record.get("species") for record in records if record.get("species"))
-    municipality_count = Counter(record.get("municipality") for record in records if record.get("municipality"))
-    
+    species_count = Counter(r.get("species") for r in records if r.get("species"))
+    municipality_count = Counter(r.get("municipality") for r in records if r.get("municipality"))
     species_percentages = (
-        {species: round((count / total) * 100, 1) for species, count in species_count.items()}
-        if total > 0
-        else {}
+        {sp: round((cnt / total) * 100, 1) for sp, cnt in species_count.items()}
+        if total > 0 else {}
     )
     hotspots = [
-        {"municipality": municipality, "records": count}
-        for municipality, count in municipality_count.most_common()
-        if count >= 3
+        {"municipality": mun, "records": cnt}
+        for mun, cnt in municipality_count.most_common()
+        if cnt >= 3
     ]
-    most_common_species = species_count.most_common(1)[0][0] if species_count else None
-    most_common_municipality = municipality_count.most_common(1)[0][0] if municipality_count else None
-    
     return {
         "total_records": total,
         "species_count": dict(species_count),
         "species_percentages": species_percentages,
         "municipality_count": dict(municipality_count),
-        "most_common_species": most_common_species,
-        "most_common_municipality": most_common_municipality,
+        "most_common_species": species_count.most_common(1)[0][0] if species_count else None,
+        "most_common_municipality": municipality_count.most_common(1)[0][0] if municipality_count else None,
         "hotspots": hotspots,
     }
 
@@ -74,20 +58,16 @@ def get_summary_tool() -> str:
 @tool
 def get_species_list_tool() -> str:
     """Devolve a lista de espécies presentes nos registos."""
-    records = load_records()
-    species = sorted({record.get("species") for record in records if record.get("species")})
+    records = _get_records()
+    species = sorted({r.get("species") for r in records if r.get("species")})
     return json.dumps(species, ensure_ascii=False)
 
 
 @tool
 def get_records_by_species_tool(species_name: str) -> str:
     """Devolve todos os registos detalhados associados a uma espécie específica."""
-    records = load_records()
-    filtered = [
-        record for record in records
-        if record.get("species") and record["species"].lower() == species_name.lower()
-    ]
-    return json.dumps(filtered, ensure_ascii=False, indent=2)
+    records = get_observations(species=species_name)
+    return json.dumps(records, ensure_ascii=False, indent=2)
 
 
 SYSTEM_PROMPT = """
@@ -102,7 +82,6 @@ Regras obrigatórias para TODOS os relatórios:
 - Inclui sempre uma secção de limitações.
 - Escreve em português europeu.
 """
-
 
 LEVEL_PROMPTS = {
     "publico": """
@@ -134,7 +113,6 @@ Instruções de escrita:
 - Evita números muito complexos (agrupa quando necessário)
 - Usa "nós" e "vós" para criar proximidade
 """,
-    
     "tecnico": """
 RELATÓRIO TÉCNICO (10-15 páginas)
 
@@ -172,7 +150,6 @@ Instruções de escrita:
 - Sugere abordagens de controlo quando apropriado
 - Inclui propostas de investigação futura
 """,
-    
     "executivo": """
 RELATÓRIO EXECUTIVO (5-8 páginas)
 
@@ -212,7 +189,7 @@ Instruções de escrita:
 - Propõe ações concretas e exequíveis
 - Tom profissional mas acessível
 - Foco em impacto e relevância para decisores
-"""
+""",
 }
 
 
@@ -222,45 +199,48 @@ def normalize_report_level(level: str | None) -> str:
     normalized = level.strip().lower()
     if normalized in ("publico", "público"):
         return "publico"
-    if normalized in ("executivo", "tecnico", "técnico"):
-        return "executivo" if normalized == "executivo" else "tecnico"
+    if normalized == "executivo":
+        return "executivo"
     return "tecnico"
 
 
 def build_agent():
-    """Gera a instância do agente de IA local usando Ollama."""
-    # Usamos o ChatOllama com o modelo llama3.2 para garantir suporte a ferramentas (Tool Calling)
-    model = ChatOllama(
-        model="llama3.2",
-        temperature=0,
-    )
-
+    model = ChatOllama(model="llama3.2", temperature=0)
     return create_agent(
         model=model,
-        tools=[
-            get_summary_tool,
-            get_species_list_tool,
-            get_records_by_species_tool,
-        ],
+        tools=[get_summary_tool, get_species_list_tool, get_records_by_species_tool],
         system_prompt=SYSTEM_PROMPT,
     )
 
 
-def generate_agent_report(level: str | None = None, species: str | None = None, municipality: str | None = None) -> str:
-    """Invoca o agente para obter o relatório final estruturado."""
+# Singleton — criado na primeira chamada, reutilizado em seguida
+_agent_instance = None
+
+
+def _get_agent():
+    global _agent_instance
+    if _agent_instance is None:
+        logger.info("A inicializar agente LLM (Ollama llama3.2)…")
+        _agent_instance = build_agent()
+    return _agent_instance
+
+
+def generate_agent_report(
+    level: str | None = None,
+    species: str | None = None,
+    municipality: str | None = None,
+) -> str:
     global _selected_species, _selected_municipality
     _selected_species = species
     _selected_municipality = municipality
-    
+
     normalized_level = normalize_report_level(level)
-    agent = build_agent()
-    
-    # Obtém o prompt específico para o nível
+    agent = _get_agent()
+
     level_instruction = LEVEL_PROMPTS.get(normalized_level, LEVEL_PROMPTS["tecnico"])
-    
-    # Constrói o pedido do utilizador com as instruções específicas
-    species_note = f" (apenas da espécie {species})" if species else ""
+    species_note      = f" (apenas da espécie {species})"      if species      else ""
     municipality_note = f" (apenas do município {municipality})" if municipality else ""
+
     user_request = f"""
 {level_instruction}
 
@@ -275,26 +255,25 @@ Por fim, escreve o relatório completo conforme a estrutura definida.
 
 IMPORTANTE: Segue EXATAMENTE a estrutura e instruções acima. Não uses estruturas diferentes.
 """
-    
-    result = agent.invoke({
-        "messages": [
-            {"role": "user", "content": user_request}
-        ]
-    })
-    
-    # Processa e extrai a mensagem final do resultado
+
+    logger.info("A gerar relatório — nível=%s species=%s municipality=%s", normalized_level, species, municipality)
+    try:
+        result = agent.invoke({"messages": [{"role": "user", "content": user_request}]})
+    finally:
+        _selected_species = None
+        _selected_municipality = None
+
     final_message = None
-    if isinstance(result, dict) and "messages" in result and result["messages"]:
+    if isinstance(result, dict) and result.get("messages"):
         final_message = result["messages"][-1]
     elif hasattr(result, "message"):
         final_message = result.message
-        
+
     if final_message is None:
-        _selected_species = None
-        _selected_municipality = None
-        return json.dumps({"error": "Não foi possível obter resposta do agente"}, ensure_ascii=False)
-        
-    content = getattr(final_message, "content", None) or (final_message.get("content") if isinstance(final_message, dict) else None)
-    _selected_species = None
-    _selected_municipality = None
+        raise RuntimeError("Agente não devolveu resposta.")
+
+    content = (
+        getattr(final_message, "content", None)
+        or (final_message.get("content") if isinstance(final_message, dict) else None)
+    )
     return content or str(final_message)

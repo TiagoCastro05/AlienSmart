@@ -3,10 +3,12 @@ import io
 import textwrap
 from collections import Counter
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.lib.utils import ImageReader
@@ -141,6 +143,17 @@ def get_summary(species: str = None, municipality: str = None):
 # Relatórios
 # ---------------------------------------------------------------------------
 
+class SpeciesConfigItem(BaseModel):
+    species: str
+    period: str = "hist"
+    scenario: str = "ssp370"
+    binary: bool = True
+
+
+class ReportRequestBody(BaseModel):
+    species_configs: list[SpeciesConfigItem] = []
+
+
 def validate_report_text(report: str, summary: dict) -> dict:
     problems = []
     total = str(summary.get("total_records", ""))
@@ -162,8 +175,8 @@ def validate_report_text(report: str, summary: dict) -> dict:
 
 
 def build_template_report(summary: dict, level: str) -> str:
-    total       = summary.get("total_records", 0)
-    species     = summary.get("most_common_species", "N/A")
+    total        = summary.get("total_records", 0)
+    species      = summary.get("most_common_species", "N/A")
     municipality = summary.get("most_common_municipality", "N/A")
     if level == "executivo":
         return (
@@ -190,16 +203,26 @@ def build_template_report(summary: dict, level: str) -> str:
     )
 
 
-def build_report_payload(level: str, species: str = None, municipality: str = None) -> dict:
-    summary = get_summary(species=species, municipality=municipality)
+def build_report_payload(
+    level: str,
+    species: str = None,
+    municipality: str = None,
+    species_configs: list = None,
+) -> dict:
+    summary = get_summary(municipality=municipality)
     try:
-        report = generate_agent_report(level, species=species, municipality=municipality)
-        source = "Llama3.2_agent"
+        report = generate_agent_report(
+            level,
+            species=species,
+            municipality=municipality,
+            species_configs=species_configs or [],
+        )
+        source = "Llama3.1_agent"
         logger.info("Relatório gerado pelo agente — nível=%s", level)
     except Exception as error:
         logger.warning("Agente falhou, usando template: %s", error)
         report = build_template_report(summary, level)
-        report = f"{report}\nMotivo tecnico: {error}".strip()
+        report = f"{report}\nMotivo tecnico: {str(error)}".strip()
         source = "template_fallback"
 
     validation = validate_report_text(report, summary)
@@ -296,13 +319,24 @@ def get_report_template(level: str = "tecnico", species: str = None, municipalit
             "level": normalized_level,
         }
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Erro ao gerar template: {exc}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar template: {str(exc)}")
 
 
 @app.post("/report")
-def generate_report(level: str = "tecnico", species: str = None, municipality: str = None):
+def generate_report(
+    level: str = "tecnico",
+    municipality: str = None,
+    body: Optional[ReportRequestBody] = None,
+):
     normalized_level = normalize_report_level(level)
-    payload = build_report_payload(normalized_level, species=species, municipality=municipality)
+    configs = [cfg.dict() for cfg in body.species_configs] if body else []
+    species = configs[0]["species"] if len(configs) == 1 else None
+    payload = build_report_payload(
+        normalized_level,
+        species=species,
+        municipality=municipality,
+        species_configs=configs,
+    )
     return {
         "source": payload["source"],
         "report": payload["report"],
@@ -394,7 +428,7 @@ def get_raster_summary(species: str):
             "2041-2070": bool(get_raster_files(species=species, period="2041-2070")),
             "2071-2100": bool(get_raster_files(species=species, period="2071-2100")),
         },
-        "scenario_analysis":  scenario_matrix(species=species),
+        "scenario_analysis":   scenario_matrix(species=species),
         "temporal_comparison": compare_periods(species=species),
     }
 

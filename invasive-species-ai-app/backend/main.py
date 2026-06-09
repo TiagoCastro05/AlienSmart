@@ -188,23 +188,23 @@ def build_template_report(summary: dict, level: str) -> str:
     return f"""## 1. Titulo\n**Relatorio Tecnico: Prevalencia de Especies Invasoras**\n\n## 2. Resumo executivo\nForam analisados {total} registos. A especie dominante e *{species}* e o municipio com mais registos e *{municipality}*.\n\n## 3. Limitações\n- Relatorio gerado automaticamente.\n- Pode existir enviesamento de amostragem.\n"""
 
 
-def build_report_payload(level: str, species: str = None, municipality: str = None) -> dict:
-    summary = get_summary(species=species, municipality=municipality)
+def build_report_payload(level: str, species: str = None, municipality: str = None, species_configs: list = None) -> dict:
+    # Summary sem filtro de espécie — só para validação
+    summary = get_summary(municipality=municipality)
     try:
-        report = generate_agent_report(level, species=species, municipality=municipality)
-        source = "Llama3.2_agent"
+        report = generate_agent_report(
+            level,
+            species=species,
+            municipality=municipality,
+            species_configs=species_configs or [],
+        )
+        source = "Llama3.1_agent"
     except Exception as error:
         report = build_template_report(summary, level)
-        report = f"""{report}\nMotivo tecnico: {str(error)}\n""".strip()
+        report = f"{report}\nMotivo tecnico: {str(error)}".strip()
         source = "template_fallback"
     validation = validate_report_text(report, summary)
-    return {
-        "source": source,
-        "report": report,
-        "validation": validation,
-        "summary": summary,
-        "level": level,
-    }
+    return {"source": source, "report": report, "validation": validation, "summary": summary, "level": level}
 
 
 def build_charts(summary: dict) -> list[bytes]:
@@ -293,10 +293,34 @@ def get_report_template(level: str = "tecnico", species: str = None, municipalit
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao gerar template: {str(e)}")
     
+from pydantic import BaseModel
+from typing import Optional
+
+class SpeciesConfigItem(BaseModel):
+    species: str
+    period: str = "hist"
+    scenario: str = "ssp370"
+    binary: bool = True
+
+class ReportRequestBody(BaseModel):
+    species_configs: list[SpeciesConfigItem] = []
+
 @app.post("/report")
-def generate_report(level: str = "tecnico", species: str = None, municipality: str = None):
+def generate_report(
+    level: str = "tecnico",
+    municipality: str = None,
+    body: ReportRequestBody = None,
+):
+    from fastapi import Body
     normalized_level = normalize_report_level(level)
-    payload = build_report_payload(normalized_level, species=species, municipality=municipality)
+    configs = [cfg.dict() for cfg in body.species_configs] if body else []
+    species = configs[0]["species"] if len(configs) == 1 else None
+    payload = build_report_payload(
+        normalized_level,
+        species=species,
+        municipality=municipality,
+        species_configs=configs,
+    )
     return {
         "source": payload["source"],
         "report": payload["report"],

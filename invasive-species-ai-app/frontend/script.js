@@ -579,8 +579,71 @@ async function loadSummary() {
   }
 }
 
-      document.getElementById("templateButton").addEventListener("click", () => alert("A exportação do relatório precisa de ser atualizada no backend para suportar múltiplas espécies."));
-      document.getElementById("reportButton").addEventListener("click", () => alert("O relatório IA precisa de ser atualizado no backend para suportar múltiplas espécies."));
+     async function generateTemplateReport() {
+  document.getElementById("report").textContent = "A gerar relatório por template...";
+  document.getElementById("pdfButton").disabled = true;
+  const level = document.getElementById("reportLevel").value;
+  const activeSpeciesList = Object.keys(activeSpeciesConfigs);
+  const species = activeSpeciesList.length === 1 ? activeSpeciesList[0] : null;
+  const municipality = activeMunicipalities.length === 1 ? activeMunicipalities[0] : null;
+  const params = new URLSearchParams({ level });
+  if (species) params.append("species", species);
+  if (municipality) params.append("municipality", municipality);
+  const resp = await fetch(`${API_URL}/report-template?${params}`, { method: "POST" });
+  const data = await resp.json();
+  document.getElementById("report").textContent = data.report;
+  document.getElementById("pdfButton").disabled = false;
+}
+
+async function generateAIReport() {
+  document.getElementById("report").textContent = "A gerar relatório com IA (Ollama)...";
+  document.getElementById("pdfButton").disabled = true;
+  const level = document.getElementById("reportLevel").value;
+  const municipality = activeMunicipalities.length > 0 ? activeMunicipalities[0] : null;
+
+  // Construir lista com os filtros ativos de cada espécie
+  const speciesConfigs = Object.entries(activeSpeciesConfigs).map(([sp, cfg]) => ({
+    species: sp,
+    period: cfg.period,
+    scenario: cfg.scenario,
+    binary: cfg.binary,
+  }));
+
+  const params = new URLSearchParams({ level });
+  if (municipality) params.append("municipality", municipality);
+  
+  try {
+    console.log("species_configs enviados:", JSON.stringify({ species_configs: speciesConfigs }, null, 2));
+    const resp = await fetch(`${API_URL}/report?${params}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ species_configs: speciesConfigs }),
+    });
+    const data = await resp.json();
+    const validationText = data.validation?.problems?.length
+      ? `\n\nValidação: ${data.validation.problems.join("; ")}`
+      : "";
+    document.getElementById("report").textContent =
+      `[Fonte: ${data.source} | Nível: ${data.level}]\n\n${data.report}${validationText}`;
+  } catch (e) {
+    document.getElementById("report").textContent = "Erro ao contactar o Ollama. Verifica se está a correr.";
+  }
+  document.getElementById("pdfButton").disabled = false;
+}
+function exportPdf() {
+  const level = document.getElementById("reportLevel").value;
+  const activeSpeciesList = Object.keys(activeSpeciesConfigs);
+  const species = activeSpeciesList.length === 1 ? activeSpeciesList[0] : null;
+  const municipality = activeMunicipalities.length === 1 ? activeMunicipalities[0] : null;
+  const params = new URLSearchParams({ level });
+  if (species) params.append("species", species);
+  if (municipality) params.append("municipality", municipality);
+  window.open(`${API_URL}/report/pdf?${params}`, "_blank");
+}
+
+document.getElementById("templateButton").addEventListener("click", generateTemplateReport);
+document.getElementById("reportButton").addEventListener("click", generateAIReport);
+document.getElementById("pdfButton").addEventListener("click", exportPdf);
 
       // Inicia a aplicação
 // Inicia a aplicação

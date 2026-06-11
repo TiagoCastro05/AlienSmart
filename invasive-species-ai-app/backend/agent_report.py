@@ -3,6 +3,9 @@ from collections import Counter
 from pathlib import Path
 import os
 import json
+import geopandas as gpd
+import rasterio
+from rasterio.mask import mask
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
@@ -176,52 +179,59 @@ def get_raster_top_species_tool(top_n: int = 5, period: str = "hist") -> str:
 @tool
 def get_raster_municipality_overlap_tool(species_name: str, municipality_name: str) -> str:
     """
-    Estima a presença de uma espécie invasora num município específico,
-    verificando se os registos de campo confirmam a sua presença nessa área
-    e qual a área adequada total do modelo SDM.
-
-    Parâmetros:
-        species_name: nome científico da espécie
-        municipality_name: nome do município (ex: "Braga")
-
-    Devolve registos de campo no município e área SDM total da espécie.
-    Nota: sem clip espacial, a área SDM é para Portugal inteiro.
+    Faz o recorte (clip) espacial do modelo SDM (raster) usando a fronteira do município
+    para devolver a área exata adequada (em km²) apenas dentro desse concelho.
     """
     try:
-        from raster_tools import get_raster_files, compute_suitable_area
-        # Registos de campo no município
-        if not DATA_FILE.exists():
-            field_records = []
-        else:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                all_records = json.load(f)
-            field_records = [
-                r for r in all_records
-                if r.get("species", "").lower() == species_name.lower()
-                and r.get("municipality", "").lower() == municipality_name.lower()
-            ]
-
-        # Área SDM histórica
+        from raster_tools import get_raster_files
+        
+        # 1. Obter o Raster da Espécie (Histórico Binário)
         files = get_raster_files(species=species_name, period="hist", binary=True)
-        sdm_info = {}
-        if files:
-            stats = compute_suitable_area(files[0])
-            sdm_info = {
-                "suitable_area_km2_portugal": stats.get("suitable_area_km2"),
-                "suitable_pct_portugal": stats.get("suitable_pct"),
-            }
-
-        return json.dumps({
-            "species": species_name,
-            "municipality": municipality_name,
-            "field_records_in_municipality": len(field_records),
-            "field_records_details": field_records,
-            "sdm_data": sdm_info,
-            "note": "A área SDM é para Portugal Continental. Não existe clip por município nesta versão.",
-        }, ensure_ascii=False, indent=2)
+        if not files:
+            return json.dumps({"erro": f"Sem raster disponível para a espécie {species_name}."})
+            
+        raster_path = files[0]
+        
+        # 2. Carregar o GeoJSON dos Municípios
+        url = "https://raw.githubusercontent.com/nmota/caop_GeoJSON/master/Portugal_Municipalities.geojson"
+        gdf = gpd.read_file(url)
+        
+        # 3. Filtrar pelo município pretendido
+        muni_gdf = gdf[gdf['Concelho'].str.lower() == municipality_name.lower()]
+        
+        if muni_gdf.empty:
+            return json.dumps({"erro": f"Polígono do município '{municipality_name}' não encontrado no GeoJSON."})
+            
+        # 4. Fazer o Recorte (Clip) do Raster
+        with rasterio.open(raster_path) as src:
+            # Converter coordenadas do município para baterem certo com o raster
+            muni_gdf = muni_gdf.to_crs(src.crs)
+            geom = [muni_gdf.geometry.values[0]]
+            
+            # Máscara: recorta a imagem pelos limites do concelho
+            out_image, out_transform = mask(src, geom, crop=True)
+            
+            # Contar píxeis ativos (onde o raster SDM diz que há presença = 1)
+            pixels_ativos = (out_image == 1).sum()
+            
+            # Calcular área em km2 (Resolução X * Resolução Y do pixel)
+            res_x, res_y = src.res
+            area_sp_km2 = (pixels_ativos * res_x * res_y) / 1_000_000
+            
+            # Calcular a área total do município para obter a percentagem
+            area_municipio_km2 = muni_gdf.geometry.area.values[0] / 1_000_000
+            pct_ocupacao = (area_sp_km2 / area_municipio_km2) * 100 if area_municipio_km2 > 0 else 0
+            
+            return json.dumps({
+                "municipio": municipality_name,
+                "especie": species_name,
+                "area_total_municipio_km2": round(area_municipio_km2, 2),
+                "area_adequada_especie_neste_municipio_km2": round(area_sp_km2, 2),
+                "percentagem_do_municipio_ocupada": round(pct_ocupacao, 2)
+            }, ensure_ascii=False, indent=2)
+            
     except Exception as e:
-        return json.dumps({"error": str(e)})
-
+        return json.dumps({"error": f"Falha ao recortar raster: {str(e)}"})
 
 # ── System prompt e level prompts ────────────────────────────────────────────
 
@@ -259,6 +269,13 @@ Características obrigatórias:
 - Explica conceitos básicos como "espécie invasora" e "modelo de distribuição"
 - Foco em informações práticas e interessantes
 - Tom educativo e não alarmista
+
+Regras obrigatórias:
+- Não existem "dados de campo" nem "observações pontuais". Fala apenas de "Área adequada", "Modelos Preditivos" ou "Distribuição Estimada".
+- Se te pedirem um relatório sobre um município, USA APENAS os dados da ferramenta de recorte (municipality_overlap) para referir áreas e percentagens locais.
+- Não mistures a área total de Portugal com a área do Município.
+- Não inventes origens biológicas para as espécies nem causalidades que não estejam nos números.
+- Escreve em português europeu.
 
 Estrutura obrigatória:
 1. Título atrativo

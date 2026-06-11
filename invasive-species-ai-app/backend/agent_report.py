@@ -1,47 +1,45 @@
 from __future__ import annotations
+
+import json
+import logging
 from collections import Counter
 from pathlib import Path
 import os
 import json
-import geopandas as gpd
-import rasterio
-from rasterio.mask import mask
 from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage
+
+from services.observation_service import get_observations
 
 load_dotenv()
-DATA_FILE = Path(__file__).parent / "records.json"
 
-_selected_species = None
-_selected_municipality = None
+logger = logging.getLogger(__name__)
+
+# Filtros globais — definidos por generate_agent_report antes de invocar o agente
+_selected_species: str | None = None
+_selected_municipality: str | None = None
 
 
-def load_records() -> list[dict]:
-    if not DATA_FILE.exists():
-        return []
-    with open(DATA_FILE, "r", encoding="utf-8") as file:
-        records = json.load(file)
-        if _selected_species:
-            records = [r for r in records if r.get("species", "").lower() == _selected_species.lower()]
-        if _selected_municipality:
-            records = [r for r in records if r.get("municipality", "").lower() == _selected_municipality.lower()]
-        return records
+def _get_records() -> list[dict]:
+    return get_observations(species=_selected_species, municipality=_selected_municipality)
 
 
 def calculate_summary() -> dict:
-    records = load_records()
+    records = _get_records()
     total = len(records)
-    species_count = Counter(record.get("species") for record in records if record.get("species"))
-    municipality_count = Counter(record.get("municipality") for record in records if record.get("municipality"))
+    species_count = Counter(r.get("species") for r in records if r.get("species"))
+    municipality_count = Counter(r.get("municipality") for r in records if r.get("municipality"))
     species_percentages = (
-        {sp: round((cnt / total) * 100, 1) for sp, cnt in species_count.items()} if total > 0 else {}
+        {sp: round((cnt / total) * 100, 1) for sp, cnt in species_count.items()}
+        if total > 0 else {}
     )
     hotspots = [
-        {"municipality": m, "records": c}
-        for m, c in municipality_count.most_common()
-        if c >= 3
+        {"municipality": mun, "records": cnt}
+        for mun, cnt in municipality_count.most_common()
+        if cnt >= 3
     ]
     return {
         "total_records": total,
@@ -54,31 +52,30 @@ def calculate_summary() -> dict:
     }
 
 
-# ── Tools originais ──────────────────────────────────────────────────────────
+# ── Tools de registos de campo ───────────────────────────────────────────────
 
 @tool
 def get_summary_tool() -> str:
-    """Devolve um resumo estatístico dos registos de campo (Records.json) em JSON."""
+    """Devolve um resumo estatístico dos registos de campo em JSON."""
     return json.dumps(calculate_summary(), ensure_ascii=False, indent=2)
 
 
 @tool
 def get_species_list_tool() -> str:
     """Devolve a lista de espécies presentes nos registos de campo."""
-    records = load_records()
+    records = _get_records()
     species = sorted({r.get("species") for r in records if r.get("species")})
     return json.dumps(species, ensure_ascii=False)
 
 
 @tool
 def get_records_by_species_tool(species_name: str) -> str:
-    """Devolve todos os registos de campo de uma espécie específica."""
-    records = load_records()
-    filtered = [r for r in records if r.get("species", "").lower() == species_name.lower()]
-    return json.dumps(filtered, ensure_ascii=False, indent=2)
+    """Devolve todos os registos detalhados associados a uma espécie específica."""
+    records = get_observations(species=species_name)
+    return json.dumps(records, ensure_ascii=False, indent=2)
 
 
-# ── Novas tools raster ───────────────────────────────────────────────────────
+# ── Tools raster (SDM) ───────────────────────────────────────────────────────
 
 @tool
 def get_raster_species_list_tool() -> str:
@@ -183,9 +180,20 @@ def get_raster_municipality_overlap_tool(species_name: str, municipality_name: s
     para devolver a área exata adequada (em km²) apenas dentro desse concelho.
     """
     try:
-        from raster_tools import get_raster_files
-        
-        # 1. Obter o Raster da Espécie (Histórico Binário)
+        from raster_tools import get_raster_files, compute_suitable_area
+        # Registos de campo no município
+        if not DATA_FILE.exists():
+            field_records = []
+        else:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                all_records = json.load(f)
+            field_records = [
+                r for r in all_records
+                if r.get("species", "").lower() == species_name.lower()
+                and r.get("municipality", "").lower() == municipality_name.lower()
+            ]
+
+        # Área SDM histórica
         files = get_raster_files(species=species_name, period="hist", binary=True)
         if not files:
             return json.dumps({"erro": f"Sem raster disponível para a espécie {species_name}."})
@@ -240,7 +248,7 @@ SYSTEM_PROMPT = """
 a partir de dados georreferenciados e modelos de distribuição de espécies (SDM).
 
 Tens acesso a dois tipos de dados:
-1. Registos de campo (Records.json): observações pontuais georreferenciadas com espécie, município e data.
+1. Registos de campo: observações pontuais georreferenciadas com espécie, município e data.
 2. Modelos SDM (rasters): modelos de distribuição que estimam a área adequada para cada espécie em Portugal,
    para períodos histórico e futuros (SSP126, SSP370, SSP585).
 
@@ -332,7 +340,7 @@ Estrutura obrigatória:
 6. Próximos passos: monitorização, responsabilidades
 7. Limitações
 8. Conclusão
-"""
+""",
 }
 
 
@@ -365,33 +373,46 @@ def build_agent():
     )
 
 
-def generate_agent_report(level=None, species=None, municipality=None, species_configs=None):
-    # NÃO definir _selected_species/_selected_municipality — não queremos filtrar o Records.json
+# Singleton do modelo — criado na primeira chamada, reutilizado em seguida
+_model_instance = None
+
+
+def _get_model() -> ChatOllama:
+    global _model_instance
+    if _model_instance is None:
+        logger.info("A inicializar modelo LLM (Ollama llama3.1:8b)…")
+        _model_instance = ChatOllama(model="llama3.1:8b", temperature=0)
+    return _model_instance
+
+
+def generate_agent_report(
+    level: str | None = None,
+    species: str | None = None,
+    municipality: str | None = None,
+    species_configs: list | None = None,
+) -> str:
     normalized_level = normalize_report_level(level)
     level_instruction = LEVEL_PROMPTS.get(normalized_level, LEVEL_PROMPTS["tecnico"])
 
-    extra_data = {}
+    # Pré-buscar dados raster para não obrigar o LLM a chamar ferramentas
+    extra_data: dict = {}
     if species_configs:
         extra_data["species_data"] = []
         for cfg in species_configs:
-            sp = cfg["species"]
-            period = cfg.get("period", "hist")
+            sp       = cfg["species"]
+            period   = cfg.get("period", "hist")
             scenario = cfg.get("scenario", "ssp370")
-            binary = cfg.get("binary", True)
+            binary   = cfg.get("binary", True)
 
-            area = json.loads(get_raster_suitable_area_tool.invoke({
-                "species_name": sp, "period": period, "scenario": scenario
-            }))
-            trend = json.loads(get_raster_trend_tool.invoke({
-                "species_name": sp, "scenario": scenario
-            }))
+            area  = json.loads(get_raster_suitable_area_tool.invoke({"species_name": sp, "period": period, "scenario": scenario}))
+            trend = json.loads(get_raster_trend_tool.invoke({"species_name": sp, "scenario": scenario}))
             entry = {
-                "species": sp,
-                "period": period,
-                "scenario": scenario if period != "hist" else "histórico",
-                "binary": "contínuo" if not binary else "binário",
-                "suitable_area": area,
-                "trend": trend,
+                "species":        sp,
+                "period":         period,
+                "scenario":       scenario if period != "hist" else "histórico",
+                "binary":         "contínuo" if not binary else "binário",
+                "suitable_area":  area,
+                "trend":          trend,
             }
             if municipality:
                 overlap = json.loads(get_raster_municipality_overlap_tool.invoke({
@@ -427,7 +448,7 @@ INSTRUÇÕES CRÍTICAS:
 - Escreve em português europeu.
 """
 
-    model = ChatOllama(model="llama3.1:8b", temperature=0)
-    from langchain_core.messages import HumanMessage
+    logger.info("A gerar relatório — nível=%s species_configs=%s municipality=%s", normalized_level, species_configs, municipality)
+    model = _get_model()
     result = model.invoke([HumanMessage(content=user_request)])
     return result.content

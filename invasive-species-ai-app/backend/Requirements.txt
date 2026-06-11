@@ -11,3 +11,5 @@ numpy
 geopandas
 rasterstats
 pyproj
+supabase
+psycopg2-binary

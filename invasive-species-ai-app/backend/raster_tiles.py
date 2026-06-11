@@ -4,6 +4,8 @@ Adiciona ao main.py com: from raster_tiles import router as tiles_router
                          app.include_router(tiles_router)
 """
 
+import hashlib
+import logging
 from pathlib import Path
 import json
 from fastapi import APIRouter, HTTPException
@@ -12,6 +14,8 @@ import numpy as np
 import io
 
 from pyproj import Transformer
+
+logger = logging.getLogger(__name__)
 
 try:
     import rasterio
@@ -154,67 +158,67 @@ def _cache_key(map_name: str, colormap: str) -> str:
     return f"{map_name}__{colormap}"
 
 
+def _file_hash(filepath: str) -> str:
+    """SHA-1 dos primeiros 64 KB do TIFF — rápido e suficiente para detectar mudanças."""
+    h = hashlib.sha1()
+    with open(filepath, "rb") as fh:
+        h.update(fh.read(65536))
+    return h.hexdigest()
+
+
 def _ensure_cached(filepath: str, colormap: str) -> dict:
     TILES_DIR.mkdir(parents=True, exist_ok=True)
 
-    map_name = Path(filepath).stem
-    key = _cache_key(map_name, colormap)
+    path_obj = Path(filepath)
+    map_name = path_obj.stem
+    key      = _cache_key(map_name, colormap)
     png_name = f"{map_name}_{colormap}.png"
     png_path = TILES_DIR / png_name
+
+    current_mtime = path_obj.stat().st_mtime
+    current_hash  = _file_hash(filepath)
 
     index = _load_index()
     entry = index.get(key)
 
-    if png_path.exists() and entry:
-        cached_bounds = entry.get("bounds", {})
-        bounds_ok = (
-            cached_bounds
-            and abs(cached_bounds.get("west", 9999)) <= 180
-            and abs(cached_bounds.get("east", 9999)) <= 180
-            and abs(cached_bounds.get("south", 9999)) <= 90
-            and abs(cached_bounds.get("north", 9999)) <= 90
-        )
-        if bounds_ok:
-            return entry
-            
-        try:
-            web_mercator_crs = CRS.from_epsg(3857)
-            wgs84_crs = CRS.from_epsg(4326)
-            with rasterio.open(filepath) as src:
-                transform_3857, width, height = calculate_default_transform(
-                    src.crs, web_mercator_crs, src.width, src.height, *src.bounds
-                )
-            west_m, north_m = transform_3857 * (0, 0)
-            east_m, south_m = transform_3857 * (width, height)
-            transformer = Transformer.from_crs(web_mercator_crs, wgs84_crs, always_xy=True)
-            west, south = transformer.transform(west_m, south_m)
-            east, north = transformer.transform(east_m, north_m)
-            entry["bounds"] = {
-                "south": round(float(south), 6),
-                "west": round(float(west), 6),
-                "north": round(float(north), 6),
-                "east": round(float(east), 6),
-            }
-            index[key] = entry
-            _save_index(index)
-        except Exception:
-            pass
+    cache_valid = (
+        entry is not None
+        and png_path.exists()
+        and entry.get("raster_hash") == current_hash
+        and entry.get("last_modified") == current_mtime
+        and _bounds_valid(entry.get("bounds", {}))
+    )
+
+    if cache_valid:
         return entry
 
-    png_bytes, bounds = _raster_to_png_overlay(filepath, colormap=colormap)
+    if entry and png_path.exists():
+        logger.info("TIFF alterado, a regenerar cache: %s", path_obj.name)
 
-    if not png_path.exists():
-        png_path.write_bytes(png_bytes)
+    png_bytes, bounds = _raster_to_png_overlay(filepath, colormap=colormap)
+    png_path.write_bytes(png_bytes)
 
     entry = {
-        "map_name": map_name,
-        "png_name": png_name,
-        "bounds": bounds,
-        "colormap": colormap,
+        "map_name":      map_name,
+        "png_name":      png_name,
+        "bounds":        bounds,
+        "colormap":      colormap,
+        "last_modified": current_mtime,
+        "raster_hash":   current_hash,
     }
     index[key] = entry
     _save_index(index)
     return entry
+
+
+def _bounds_valid(bounds: dict) -> bool:
+    return (
+        bool(bounds)
+        and abs(bounds.get("west",  9999)) <= 180
+        and abs(bounds.get("east",  9999)) <= 180
+        and abs(bounds.get("south", 9999)) <= 90
+        and abs(bounds.get("north", 9999)) <= 90
+    )
 
 
 def _apply_colormap(normalized: np.ndarray, mask: np.ndarray, colormap: str) -> np.ndarray:

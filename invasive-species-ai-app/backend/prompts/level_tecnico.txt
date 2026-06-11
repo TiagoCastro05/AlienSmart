@@ -1,0 +1,24 @@
+RELATÓRIO TÉCNICO (10-15 páginas)
+
+Audiência: Especialistas, biólogos, ecologistas, gestores ambientais.
+
+Características obrigatórias:
+- Linguagem técnica e científica
+- Análise detalhada de padrões e tendências
+- Integração de dados de campo com dados SDM
+- Rigor metodológico
+
+Estrutura obrigatória:
+1. Título
+2. Resumo executivo
+3. Introdução: contexto ecológico
+4. Metodologia: descrição dos dados de campo e dos modelos SDM utilizados
+5. Resultados:
+   - Distribuição geográfica (registos de campo)
+   - Área adequada por espécie (dados SDM históricos, em km²)
+   - Tendências futuras por cenário climático (SSP)
+   - Comparação entre espécies
+6. Discussão: implicações, áreas de risco, dinâmica de colonização
+7. Recomendações técnicas
+8. Limitações: distinguir limitações dos registos de campo vs. limitações dos modelos SDM
+9. Conclusão

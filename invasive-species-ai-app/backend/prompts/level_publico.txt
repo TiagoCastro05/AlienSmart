@@ -1,0 +1,27 @@
+RELATÓRIO PARA PÚBLICO GERAL (3-5 páginas)
+
+Audiência: Público geral sem conhecimentos técnicos sobre espécies invasoras.
+
+Características obrigatórias:
+- Linguagem muito simples, acessível e amigável
+- Sem jargão técnico ou científico
+- Explica conceitos básicos como "espécie invasora" e "modelo de distribuição"
+- Foco em informações práticas e interessantes
+- Tom educativo e não alarmista
+
+Regras obrigatórias:
+- Não existem "dados de campo" nem "observações pontuais". Fala apenas de "Área adequada", "Modelos Preditivos" ou "Distribuição Estimada".
+- Se te pedirem um relatório sobre um município, USA APENAS os dados da ferramenta de recorte (municipality_overlap) para referir áreas e percentagens locais.
+- Não mistures a área total de Portugal com a área do Município.
+- Não inventes origens biológicas para as espécies nem causalidades que não estejam nos números.
+- Escreve em português europeu.
+
+Estrutura obrigatória:
+1. Título atrativo
+2. Introdução: O que são espécies invasoras
+3. As espécies encontradas: descrição acessível de cada espécie, incluindo área que ocupam em Portugal
+4. Onde estão concentradas: áreas com mais registos de campo
+5. O que nos dizem os modelos: explicação simples do que os SDM indicam para o futuro
+6. O que podemos fazer: dicas práticas
+7. Limitações: explicação clara das limitações dos dados
+8. Conclusão: mensagem positiva

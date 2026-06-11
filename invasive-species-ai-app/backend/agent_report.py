@@ -241,107 +241,24 @@ def get_raster_municipality_overlap_tool(species_name: str, municipality_name: s
     except Exception as e:
         return json.dumps({"error": f"Falha ao recortar raster: {str(e)}"})
 
-# ── System prompt e level prompts ────────────────────────────────────────────
+# ── Carregamento de prompts a partir de ficheiros .txt ───────────────────────
 
-SYSTEM_PROMPT = """
-És um assistente especializado em escrever relatórios sobre espécies invasoras
-a partir de dados georreferenciados e modelos de distribuição de espécies (SDM).
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
 
-Tens acesso a dois tipos de dados:
-1. Registos de campo: observações pontuais georreferenciadas com espécie, município e data.
-2. Modelos SDM (rasters): modelos de distribuição que estimam a área adequada para cada espécie em Portugal,
-   para períodos histórico e futuros (SSP126, SSP370, SSP585).
 
-Regras obrigatórias:
-- Usa apenas dados obtidos através das ferramentas disponíveis.
-- Começa SEMPRE por chamar get_summary_tool e get_raster_species_list_tool.
-- Para relatórios sobre uma espécie específica, chama get_raster_suitable_area_tool e get_raster_trend_tool.
-- Para relatórios gerais, chama get_raster_top_species_tool para identificar as espécies mais prevalentes.
-- Se for mencionado um município, chama get_raster_municipality_overlap_tool.
-- Não inventes espécies, municípios, números, percentagens ou referências bibliográficas.
-- Não afirmes causalidade nem impacto ecológico sem dados das ferramentas.
-- Inclui sempre uma secção de limitações.
-- Escreve em português europeu.
-- Distingue claramente dados de campo (observações diretas) de dados SDM (modelos preditivos).
-"""
+def _load_prompt(filename: str) -> str:
+    return (_PROMPTS_DIR / filename).read_text(encoding="utf-8").strip()
+
+
+SYSTEM_PROMPT = _load_prompt("system.txt")
 
 LEVEL_PROMPTS = {
-    "publico": """
-RELATÓRIO PARA PÚBLICO GERAL (3-5 páginas)
-
-Audiência: Público geral sem conhecimentos técnicos sobre espécies invasoras.
-
-Características obrigatórias:
-- Linguagem muito simples, acessível e amigável
-- Sem jargão técnico ou científico
-- Explica conceitos básicos como "espécie invasora" e "modelo de distribuição"
-- Foco em informações práticas e interessantes
-- Tom educativo e não alarmista
-
-Regras obrigatórias:
-- Não existem "dados de campo" nem "observações pontuais". Fala apenas de "Área adequada", "Modelos Preditivos" ou "Distribuição Estimada".
-- Se te pedirem um relatório sobre um município, USA APENAS os dados da ferramenta de recorte (municipality_overlap) para referir áreas e percentagens locais.
-- Não mistures a área total de Portugal com a área do Município.
-- Não inventes origens biológicas para as espécies nem causalidades que não estejam nos números.
-- Escreve em português europeu.
-
-Estrutura obrigatória:
-1. Título atrativo
-2. Introdução: O que são espécies invasoras
-3. As espécies encontradas: descrição acessível de cada espécie, incluindo área que ocupam em Portugal
-4. Onde estão concentradas: áreas com mais registos de campo
-5. O que nos dizem os modelos: explicação simples do que os SDM indicam para o futuro
-6. O que podemos fazer: dicas práticas
-7. Limitações: explicação clara das limitações dos dados
-8. Conclusão: mensagem positiva
-""",
-    "tecnico": """
-RELATÓRIO TÉCNICO (10-15 páginas)
-
-Audiência: Especialistas, biólogos, ecologistas, gestores ambientais.
-
-Características obrigatórias:
-- Linguagem técnica e científica
-- Análise detalhada de padrões e tendências
-- Integração de dados de campo com dados SDM
-- Rigor metodológico
-
-Estrutura obrigatória:
-1. Título
-2. Resumo executivo
-3. Introdução: contexto ecológico
-4. Metodologia: descrição dos dados de campo e dos modelos SDM utilizados
-5. Resultados:
-   - Distribuição geográfica (registos de campo)
-   - Área adequada por espécie (dados SDM históricos, em km²)
-   - Tendências futuras por cenário climático (SSP)
-   - Comparação entre espécies
-6. Discussão: implicações, áreas de risco, dinâmica de colonização
-7. Recomendações técnicas
-8. Limitações: distinguir limitações dos registos de campo vs. limitações dos modelos SDM
-9. Conclusão
-""",
-    "executivo": """
-RELATÓRIO EXECUTIVO (5-8 páginas)
-
-Audiência: Gestores, tomadores de decisão, autoridades ambientais.
-
-Características obrigatórias:
-- Linguagem clara e profissional
-- Foco em factos essenciais e ações
-- Orientado para decisão
-
-Estrutura obrigatória:
-1. Título
-2. Resumo executivo: 3-4 pontos-chave
-3. Situação atual: espécies identificadas, área SDM, registos de campo
-4. Achados principais: espécies prioritárias, hotspots, tendências futuras
-5. Prioridades de ação: áreas e espécies que requerem intervenção
-6. Próximos passos: monitorização, responsabilidades
-7. Limitações
-8. Conclusão
-""",
+    "publico":   _load_prompt("level_publico.txt"),
+    "tecnico":   _load_prompt("level_tecnico.txt"),
+    "executivo": _load_prompt("level_executivo.txt"),
 }
+
+_USER_REQUEST_TEMPLATE = _load_prompt("user_request.txt")
 
 
 def normalize_report_level(level: str | None) -> str:
@@ -429,24 +346,12 @@ def generate_agent_report(
     species_list = [cfg["species"] for cfg in species_configs] if species_configs else []
     species_note = f" sobre as espécies: {', '.join(species_list)}" if species_list else ""
 
-    user_request = f"""
-{level_instruction}
-
-Gera agora o relatório{species_note}{municipality_note} seguindo rigorosamente a estrutura acima.
-
-## DADOS REAIS — USA APENAS ESTES, IGNORA QUALQUER OUTRO CONHECIMENTO:
-
-### Dados SDM por espécie (período e tipo conforme selecionado pelo utilizador):
-{json.dumps(extra_data, ensure_ascii=False, indent=2)}
-
-INSTRUÇÕES CRÍTICAS:
-- Analisa APENAS as espécies listadas em "species_data" acima.
-- Para cada espécie usa EXATAMENTE o período, tipo (binário/contínuo) e cenário indicados.
-- Os valores de área adequada e tendência são os únicos dados numéricos que podes usar.
-- NÃO menciones outras espécies que não estejam nos dados acima.
-- NÃO inventes números, áreas ou tendências.
-- Escreve em português europeu.
-"""
+    user_request = _USER_REQUEST_TEMPLATE.format(
+        level_instruction=level_instruction,
+        species_note=species_note,
+        municipality_note=municipality_note,
+        extra_data_json=json.dumps(extra_data, ensure_ascii=False, indent=2),
+    )
 
     logger.info("A gerar relatório — nível=%s species_configs=%s municipality=%s", normalized_level, species_configs, municipality)
     model = _get_model()

@@ -1,0 +1,16 @@
+{level_instruction}
+
+Gera agora o relatório{species_note}{municipality_note} seguindo rigorosamente a estrutura acima.
+
+## DADOS REAIS — USA APENAS ESTES, IGNORA QUALQUER OUTRO CONHECIMENTO:
+
+### Dados SDM por espécie (período e tipo conforme selecionado pelo utilizador):
+{extra_data_json}
+
+INSTRUÇÕES CRÍTICAS:
+- Analisa APENAS as espécies listadas em "species_data" acima.
+- Para cada espécie usa EXATAMENTE o período, tipo (binário/contínuo) e cenário indicados.
+- Os valores de área adequada e tendência são os únicos dados numéricos que podes usar.
+- NÃO menciones outras espécies que não estejam nos dados acima.
+- NÃO inventes números, áreas ou tendências.
+- Escreve em português europeu.

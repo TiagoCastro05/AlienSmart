@@ -444,13 +444,17 @@ async function loadSpecies() {
             html += `
               <div class="legend-binary">
                 <div class="legend-swatch" style="background:${darkestColor}; opacity:0.8;"></div>
-                <span>Presença</span>
+                <span>Adequado</span>
+              </div>
+              <div class="legend-binary">
+                <div class="legend-swatch legend-swatch-absent"></div>
+                <span>Não adequado</span>
               </div>`;
           } else {
             const gradient = `linear-gradient(to right, ${stops.join(", ")})`;
             html += `
               <div class="legend-gradient" style="background:${gradient};"></div>
-              <div class="legend-labels"><span>Ausência</span><span>Alta</span></div>`;
+              <div class="legend-labels"><span>Não adequado</span><span>Adequado</span></div>`;
           }
           html += `</div>`;
         });

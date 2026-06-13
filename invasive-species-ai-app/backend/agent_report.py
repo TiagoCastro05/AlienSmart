@@ -319,28 +319,33 @@ def generate_agent_report(
             sp       = cfg["species"]
             period   = cfg.get("period", "hist")
             scenario = cfg.get("scenario", "ssp370")
-            binary   = cfg.get("binary", True)
 
-            area  = json.loads(get_raster_suitable_area_tool.invoke({"species_name": sp, "period": period, "scenario": scenario}))
-            trend = json.loads(get_raster_trend_tool.invoke({"species_name": sp, "scenario": scenario}))
-            entry = {
-                "species":        sp,
-                "period":         period,
-                "scenario":       scenario if period != "hist" else "histórico",
-                "binary":         "contínuo" if not binary else "binário",
-                "suitable_area":  area,
-                "trend":          trend,
-            }
+            # Se um município for selecionado, damos APENAS os dados locais à IA
             if municipality:
                 overlap = json.loads(get_raster_municipality_overlap_tool.invoke({
                     "species_name": sp, "municipality_name": municipality
                 }))
-                entry["municipality_data"] = overlap
+                entry = {
+                    "especie": sp,
+                    "periodo": period,
+                    "cenario": scenario if period != "hist" else "histórico",
+                    "DADOS_MATEMATICOS_DO_MUNICIPIO": overlap
+                }
+            # Se for um relatório para Portugal inteiro, damos os dados nacionais
+            else:
+                area  = json.loads(get_raster_suitable_area_tool.invoke({"species_name": sp, "period": period, "scenario": scenario}))
+                trend = json.loads(get_raster_trend_tool.invoke({"species_name": sp, "scenario": scenario}))
+                entry = {
+                    "especie": sp,
+                    "periodo": period,
+                    "cenario": scenario if period != "hist" else "histórico",
+                    "DADOS_NACIONAIS": {
+                        "area_adequada": area,
+                        "tendencia": trend
+                    }
+                }
+            
             extra_data["species_data"].append(entry)
-    else:
-        extra_data["top5_species"] = json.loads(
-            get_raster_top_species_tool.invoke({"top_n": 5, "period": "hist"})
-        )
 
     municipality_note = f" no município **{municipality}**" if municipality else " em Portugal"
     species_list = [cfg["species"] for cfg in species_configs] if species_configs else []

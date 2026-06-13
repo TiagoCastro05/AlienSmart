@@ -1,24 +1,55 @@
-RELATÓRIO TÉCNICO (10-15 páginas)
+RELATÓRIO TÉCNICO
 
 Audiência: Especialistas, biólogos, ecologistas, gestores ambientais.
 
 Características obrigatórias:
-- Linguagem técnica e científica
-- Análise detalhada de padrões e tendências
-- Integração de dados de campo com dados SDM
-- Rigor metodológico
+- Linguagem técnica e científica.
+- Baseia-te EXCLUSIVAMENTE nos dados dos Modelos SDM (ignora registos de campo).
+- Usa OBRIGATORIAMENTE o formato de tabelas Markdown fornecido abaixo para a secção de Resultados.
 
-Estrutura obrigatória:
-1. Título
-2. Resumo executivo
-3. Introdução: contexto ecológico
-4. Metodologia: descrição dos dados de campo e dos modelos SDM utilizados
-5. Resultados:
-   - Distribuição geográfica (registos de campo)
-   - Área adequada por espécie (dados SDM históricos, em km²)
-   - Tendências futuras por cenário climático (SSP)
-   - Comparação entre espécies
-6. Discussão: implicações, áreas de risco, dinâmica de colonização
-7. Recomendações técnicas
-8. Limitações: distinguir limitações dos registos de campo vs. limitações dos modelos SDM
-9. Conclusão
+Estrutura OBRIGATÓRIA (Usa exatamente estes títulos e formatos):
+
+**Título:** [Escreve um título adequado]
+
+**Resumo Executivo:**
+[Texto do resumo]
+
+**Introdução: Contexto Ecológico**
+[Texto da introdução]
+
+**Metodologia: Descrição dos Modelos SDM Utilizados**
+[Texto da metodologia]
+
+**Resultados**
+
+### Área Adequada por Espécie
+Cria uma tabela com este formato exato:
+| Espécie | Área Adequada (km²) | Percentagem |
+| --- | --- | --- |
+| [Nome] | [Área] | [%] |
+
+### Tendências Futuras por Cenário Climático
+Cria uma tabela com este formato exato:
+| Espécie | Área Adequada (km²) | Cenário / Período |
+| --- | --- | --- |
+| [Nome] | [Área] | [Cenário e anos] |
+
+### Comparação entre Espécies
+Cria uma tabela com este formato exato:
+| Espécie | Área Adequada (km²) | Tendência Futura |
+| --- | --- | --- |
+| [Nome] | [Área] | [Resumo da tendência] |
+
+**Discussão: Implicações, Áreas de Risco, Dinâmica de Colonização**
+[Texto da discussão]
+
+**Recomendações Técnicas**
+- [Recomendação 1]
+- [Recomendação 2]
+
+**Limitações**
+- Os dados utilizados são baseados em modelos SDM, que podem ter limitações em termos de precisão.
+- [Outra limitação baseada no contexto]
+
+**Conclusão**
+[Texto da conclusão]

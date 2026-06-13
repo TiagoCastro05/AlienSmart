@@ -4,6 +4,7 @@ import textwrap
 from collections import Counter
 from pathlib import Path
 from typing import Optional
+from pdf_builder import build_pdf
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -262,48 +263,7 @@ def build_charts(summary: dict) -> list[bytes]:
     return charts
 
 
-def build_pdf(report_text: str, level: str, summary: dict) -> bytes:
-    buf = io.BytesIO()
-    pdf = canvas.Canvas(buf, pagesize=A4)
-    _, height = A4
-    margin = 2 * cm
-    y = height - margin
 
-    pdf.setFont("Helvetica-Bold", 14)
-    pdf.drawString(margin, y, f"Relatorio ({level})")
-    y -= 1.2 * cm
-
-    pdf.setFont("Helvetica", 10)
-    clean = report_text.replace("**", "").replace("## ", "")
-    for paragraph in clean.split("\n"):
-        lines = textwrap.wrap(paragraph, width=95) if paragraph else [""]
-        for line in lines:
-            if y <= margin:
-                pdf.showPage()
-                pdf.setFont("Helvetica", 10)
-                y = height - margin
-            pdf.drawString(margin, y, line)
-            y -= 0.5 * cm
-        y -= 0.2 * cm
-
-    chart_images = build_charts(summary)
-    if chart_images:
-        pdf.showPage()
-        y = height - margin
-        pdf.setFont("Helvetica-Bold", 12)
-        pdf.drawString(margin, y, "Graficos")
-        y -= 1 * cm
-        for chart in chart_images:
-            if y <= 8 * cm:
-                pdf.showPage()
-                y = height - margin
-            image = ImageReader(io.BytesIO(chart))
-            pdf.drawImage(image, margin, y - 7 * cm, width=16 * cm, height=7 * cm, preserveAspectRatio=True)
-            y -= 8 * cm
-
-    pdf.save()
-    buf.seek(0)
-    return buf.read()
 
 
 @app.post("/report-template")
@@ -346,10 +306,14 @@ def generate_report(
 
 
 @app.get("/report/pdf")
-def export_report_pdf(level: str = "tecnico", species: str = None, municipality: str = None):
+def export_report_pdf(level: str = "tecnico", species: str = None, municipality: str = None, body: ReportRequestBody = None):
     normalized_level = normalize_report_level(level)
     payload = build_report_payload(normalized_level, species=species, municipality=municipality)
-    pdf_bytes = build_pdf(payload["report"], normalized_level, payload["summary"])
+    filters = {
+        "species": [species] if species else [],
+        "municipality": municipality,
+    }
+    pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters)
     filename = f"relatorio_{normalized_level}.pdf"
     return Response(
         content=pdf_bytes,

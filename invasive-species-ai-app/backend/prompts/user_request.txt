@@ -2,15 +2,14 @@
 
 Gera agora o relatório{species_note}{municipality_note} seguindo rigorosamente a estrutura acima.
 
-## DADOS REAIS — USA APENAS ESTES, IGNORA QUALQUER OUTRO CONHECIMENTO:
+## DADOS SDM REAIS — USA APENAS ESTES VALORES, NÃO INVENTES NADA:
 
-### Dados SDM por espécie (período e tipo conforme selecionado pelo utilizador):
 {extra_data_json}
 
 INSTRUÇÕES CRÍTICAS:
-- Analisa APENAS as espécies listadas em "species_data" acima.
-- Para cada espécie usa EXATAMENTE o período, tipo (binário/contínuo) e cenário indicados.
-- Os valores de área adequada e tendência são os únicos dados numéricos que podes usar.
-- NÃO menciones outras espécies que não estejam nos dados acima.
-- NÃO inventes números, áreas ou tendências.
+- Os dados acima são os ÚNICOS que podes usar. Não uses conhecimento externo nem inventes números.
+- NÃO uses dados de registos de campo (observações vetoriais). APENAS dados SDM (rasters).
+- Se o JSON contém "species_data": analisa CADA espécie listada usando os seus valores exatos de área_adequada_km2 e tendencia_futura.
+- Se o JSON contém "visao_geral_sdm": escreve uma análise geral das principais espécies invasoras com base nas top_especies listadas.
+- Substitui SEMPRE os placeholders da estrutura (como [Nome], [Área], [%]) pelos valores reais dos dados acima.
 - Escreve em português europeu.

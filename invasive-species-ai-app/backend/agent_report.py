@@ -18,6 +18,40 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Cache em memória — carregada uma vez do Supabase na primeira utilização
+_raster_cache: list[dict] | None = None
+
+
+def _get_raster_cache() -> list[dict]:
+    global _raster_cache
+    if _raster_cache is None:
+        try:
+            from raster_db import get_raster_stats
+            _raster_cache = get_raster_stats().data or []
+            logger.info("Cache raster carregada: %d registos", len(_raster_cache))
+        except Exception as exc:
+            logger.warning("Não foi possível carregar cache raster: %s", exc)
+            _raster_cache = []
+    return _raster_cache
+
+
+def _cache_lookup(species: str, period: str, scenario: str | None) -> dict | None:
+    for row in _get_raster_cache():
+        if (
+            row.get("species_name") == species
+            and row.get("period") == period
+            and row.get("scenario") == scenario
+        ):
+            return row
+    return None
+
+
+def _cache_by_period(period: str, scenario: str | None) -> list[dict]:
+    return [
+        r for r in _get_raster_cache()
+        if r.get("period") == period and r.get("scenario") == scenario
+    ]
+
 # Filtros globais — definidos por generate_agent_report antes de invocar o agente
 _selected_species: str | None = None
 _selected_municipality: str | None = None
@@ -106,8 +140,19 @@ def get_raster_suitable_area_tool(species_name: str, period: str = "hist", scena
     Devolve área em km², percentagem adequada e número de píxeis.
     """
     try:
-        from raster_tools import get_raster_files, compute_suitable_area
         sc = None if period == "hist" else scenario
+        cached = _cache_lookup(species_name, period, sc)
+        if cached:
+            return json.dumps({
+                "species": species_name,
+                "period": period,
+                "scenario": scenario if period != "hist" else "N/A",
+                "suitable_area_km2": cached.get("suitable_area_km2"),
+                "suitable_pct": None,
+                "n_suitable_pixels": None,
+            }, ensure_ascii=False)
+        # Fallback: calcular dos TIFs
+        from raster_tools import get_raster_files, compute_suitable_area
         files = get_raster_files(species=species_name, period=period, scenario=sc, binary=True)
         if not files:
             return json.dumps({"error": f"Sem raster para {species_name} / {period}"})
@@ -138,6 +183,28 @@ def get_raster_trend_tool(species_name: str, scenario: str = "ssp370") -> str:
     Útil para perceber a tendência de invasão no futuro.
     """
     try:
+        by_period = {}
+        for p in ["hist", "2041-2070", "2071-2100"]:
+            sc = None if p == "hist" else scenario
+            row = _cache_lookup(species_name, p, sc)
+            if row:
+                by_period[p] = {"suitable_area_km2": row.get("suitable_area_km2"), "suitable_pct": None}
+        if len(by_period) == 3:
+            hist_area = by_period["hist"]["suitable_area_km2"] or 0
+            area_2041 = by_period["2041-2070"]["suitable_area_km2"] or 0
+            area_2071 = by_period["2071-2100"]["suitable_area_km2"] or 0
+            return json.dumps({
+                "species": species_name,
+                "scenario": scenario,
+                "by_period": by_period,
+                "changes": {
+                    "hist_to_2041_2070_km2": round(area_2041 - hist_area, 2),
+                    "hist_to_2071_2100_km2": round(area_2071 - hist_area, 2),
+                    "hist_to_2041_2070_pct": round((area_2041 - hist_area) / hist_area * 100, 2) if hist_area > 0 else 0,
+                    "hist_to_2071_2100_pct": round((area_2071 - hist_area) / hist_area * 100, 2) if hist_area > 0 else 0,
+                },
+            }, ensure_ascii=False, indent=2)
+        # Fallback: calcular dos TIFs
         from raster_tools import compare_periods
         result = compare_periods(species=species_name, scenario=scenario)
         return json.dumps(result, ensure_ascii=False, indent=2)
@@ -158,6 +225,16 @@ def get_raster_top_species_tool(top_n: int = 5, period: str = "hist") -> str:
     Útil para identificar as espécies mais prevalentes nos modelos de distribuição.
     """
     try:
+        sc = None if period == "hist" else "ssp370"
+        rows = _cache_by_period(period, sc)
+        if rows:
+            results = sorted(
+                [{"species": r["species_name"], "suitable_area_km2": r.get("suitable_area_km2") or 0} for r in rows],
+                key=lambda x: x["suitable_area_km2"],
+                reverse=True,
+            )
+            return json.dumps(results[:top_n], ensure_ascii=False, indent=2)
+        # Fallback: calcular dos TIFs
         from raster_tools import get_available_species, get_raster_files, compute_suitable_area
         all_species = get_available_species()
         results = []
@@ -313,14 +390,15 @@ def generate_agent_report(
 
     # Pré-buscar dados raster para não obrigar o LLM a chamar ferramentas
     extra_data: dict = {}
+
     if species_configs:
+        # Espécies específicas selecionadas pelo utilizador
         extra_data["species_data"] = []
         for cfg in species_configs:
             sp       = cfg["species"]
             period   = cfg.get("period", "hist")
             scenario = cfg.get("scenario", "ssp370")
 
-            # Se um município for selecionado, damos APENAS os dados locais à IA
             if municipality:
                 overlap = json.loads(get_raster_municipality_overlap_tool.invoke({
                     "species_name": sp, "municipality_name": municipality
@@ -329,9 +407,8 @@ def generate_agent_report(
                     "especie": sp,
                     "periodo": period,
                     "cenario": scenario if period != "hist" else "histórico",
-                    "DADOS_MATEMATICOS_DO_MUNICIPIO": overlap
+                    "area_adequada_municipio": overlap,
                 }
-            # Se for um relatório para Portugal inteiro, damos os dados nacionais
             else:
                 area  = json.loads(get_raster_suitable_area_tool.invoke({"species_name": sp, "period": period, "scenario": scenario}))
                 trend = json.loads(get_raster_trend_tool.invoke({"species_name": sp, "scenario": scenario}))
@@ -339,17 +416,26 @@ def generate_agent_report(
                     "especie": sp,
                     "periodo": period,
                     "cenario": scenario if period != "hist" else "histórico",
-                    "DADOS_NACIONAIS": {
-                        "area_adequada": area,
-                        "tendencia": trend
-                    }
+                    "area_adequada_km2": area,
+                    "tendencia_futura": trend,
                 }
-            
             extra_data["species_data"].append(entry)
+
+    else:
+        # Sem espécies selecionadas → visão geral das top invasoras por SDM
+        try:
+            top_hist = json.loads(get_raster_top_species_tool.invoke({"top_n": 8, "period": "hist"}))
+            top_fut  = json.loads(get_raster_top_species_tool.invoke({"top_n": 8, "period": "2041-2070"}))
+            extra_data["visao_geral_sdm"] = {
+                "top_especies_historico": top_hist,
+                "top_especies_futuro_2041_2070_ssp370": top_fut,
+            }
+        except Exception:
+            extra_data["visao_geral_sdm"] = {"nota": "Dados SDM não disponíveis de momento."}
 
     municipality_note = f" no município **{municipality}**" if municipality else " em Portugal"
     species_list = [cfg["species"] for cfg in species_configs] if species_configs else []
-    species_note = f" sobre as espécies: {', '.join(species_list)}" if species_list else ""
+    species_note = f" sobre as espécies: {', '.join(species_list)}" if species_list else " (visão geral)"
 
     user_request = _USER_REQUEST_TEMPLATE.format(
         level_instruction=level_instruction,

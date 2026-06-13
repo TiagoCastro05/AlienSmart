@@ -238,6 +238,76 @@ def build_report_payload(
     return {"source": source, "report": report, "validation": validation, "summary": summary, "level": level}
 
 
+def build_raster_map_image(species: str, period: str = "hist", scenario: str = None) -> bytes | None:
+    """Renderiza o raster SDM de uma espécie como PNG com fronteira de Portugal e legenda."""
+    files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
+    if not files:
+        return None
+    try:
+        import numpy as np
+        import rasterio as rio
+        from matplotlib.patches import Patch
+        from matplotlib.colors import ListedColormap, BoundaryNorm
+        from rasterio.plot import show as rio_show
+        import geopandas as gpd
+
+        fig, ax = plt.subplots(figsize=(8, 7), facecolor="white")
+
+        with rio.open(files[0]) as src:
+            data = src.read(1).astype(float)
+            nodata = src.nodata
+            transform = src.transform
+            crs_epsg = src.crs.to_epsg()
+
+            if nodata is not None:
+                data[(data == 0) | (data == nodata)] = np.nan
+            else:
+                data[data == 0] = np.nan
+
+        # Fundo cinzento para "não adequado"; verde escuro para "adequado"
+        cmap = ListedColormap(["#e8e8e8", "#2d6a4f"])
+        norm = BoundaryNorm([0, 0.5, 1.5], ncolors=2)
+
+        # -1 para NaN → fica abaixo do norm → set_under(alpha=0) → transparente
+        data_render = np.where(np.isnan(data), -1, data)
+        cmap.set_under(alpha=0)
+
+        rio_show((data_render, transform), ax=ax, cmap=cmap, norm=norm)
+
+        # Fronteira de Portugal (+ Espanha para contexto)
+        try:
+            world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
+            iberia = world[world["name"].isin(["Portugal", "Spain"])]
+            if crs_epsg and crs_epsg != 4326:
+                iberia = iberia.to_crs(epsg=crs_epsg)
+            iberia.plot(ax=ax, facecolor="none", edgecolor="#333333", linewidth=0.8, zorder=5)
+        except Exception:
+            pass
+
+        period_label = "Histórico (1981–2024)" if period == "hist" else period
+        scenario_label = f" · {scenario}" if scenario and period != "hist" else ""
+        ax.set_title(f"{species}\n{period_label}{scenario_label}", fontsize=10, fontweight="bold", pad=8)
+        ax.set_axis_off()
+        ax.legend(
+            handles=[
+                Patch(facecolor="#2d6a4f", label="Área adequada"),
+                Patch(facecolor="#e8e8e8", edgecolor="#aaa", label="Não adequado"),
+            ],
+            loc="lower left", fontsize=8, framealpha=0.9,
+            title="Legenda", title_fontsize=8,
+        )
+
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception as exc:
+        logger.warning("Erro ao gerar mapa raster para %s: %s", species, exc)
+        return None
+
+
 def build_charts(summary: dict) -> list[bytes]:
     charts: list[bytes] = []
     for title, data in (
@@ -264,6 +334,16 @@ def build_charts(summary: dict) -> list[bytes]:
 
 
 
+def _build_species_maps(configs: list) -> list[dict]:
+    maps = []
+    for cfg in configs:
+        sp     = cfg["species"]
+        period = cfg.get("period", "hist")
+        sc     = cfg.get("scenario") if period != "hist" else None
+        png    = build_raster_map_image(sp, period, sc)
+        if png:
+            maps.append({"species": sp, "period": period, "scenario": sc, "map_png": png})
+    return maps
 
 
 @app.post("/report-template")
@@ -289,7 +369,7 @@ def generate_report(
     body: Optional[ReportRequestBody] = None,
 ):
     normalized_level = normalize_report_level(level)
-    configs = [cfg.dict() for cfg in body.species_configs] if body else []
+    configs = [cfg.model_dump() for cfg in body.species_configs] if body else []
     species = configs[0]["species"] if len(configs) == 1 else None
     payload = build_report_payload(
         normalized_level,
@@ -306,14 +386,40 @@ def generate_report(
 
 
 @app.get("/report/pdf")
-def export_report_pdf(level: str = "tecnico", species: str = None, municipality: str = None, body: ReportRequestBody = None):
+def export_report_pdf(
+    level: str = "tecnico",
+    species: str = None,
+    municipality: str = None,
+    period: str = "hist",
+    scenario: str = "ssp370",
+):
     normalized_level = normalize_report_level(level)
-    payload = build_report_payload(normalized_level, species=species, municipality=municipality)
-    filters = {
-        "species": [species] if species else [],
-        "municipality": municipality,
-    }
-    pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters)
+    configs = [{"species": species, "period": period, "scenario": scenario, "binary": True}] if species else []
+    payload = build_report_payload(normalized_level, species=species, municipality=municipality, species_configs=configs)
+    filters = {"species": [species] if species else [], "municipality": municipality}
+    species_maps = _build_species_maps(configs)
+    pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps)
+    filename = f"relatorio_{normalized_level}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.post("/report/pdf")
+def export_report_pdf_post(
+    level: str = "tecnico",
+    municipality: str = None,
+    body: Optional[ReportRequestBody] = None,
+):
+    normalized_level = normalize_report_level(level)
+    configs = [cfg.model_dump() for cfg in body.species_configs] if body and body.species_configs else []
+    species = configs[0]["species"] if len(configs) == 1 else None
+    payload = build_report_payload(normalized_level, species=species, municipality=municipality, species_configs=configs)
+    filters = {"species": [c["species"] for c in configs], "municipality": municipality}
+    species_maps = _build_species_maps(configs)
+    pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps)
     filename = f"relatorio_{normalized_level}.pdf"
     return Response(
         content=pdf_bytes,

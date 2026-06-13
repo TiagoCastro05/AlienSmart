@@ -15,6 +15,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import (
     HRFlowable,
+    Image,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -163,6 +164,7 @@ def build_pdf(
     level: str,
     summary: dict | None = None,
     filters: dict | None = None,
+    species_maps: list[dict] | None = None,
 ) -> bytes:
     """
     Gera PDF profissional a partir do markdown gerado pelo Ollama.
@@ -262,6 +264,20 @@ def build_pdf(
         # Parágrafo normal
         story.append(Paragraph(_fmt(stripped), styles["body"]))
         i += 1
+
+    # Mapas raster (PNG pré-renderizados em main.py)
+    if species_maps:
+        story.append(Spacer(1, 0.4 * cm))
+        story.append(Paragraph("Mapas de Distribuição Potencial", styles["h2"]))
+        story.append(HRFlowable(width="100%", thickness=1.2, color=GREEN_MID, spaceAfter=6))
+        for m in species_maps:
+            period_label = "Histórico (1981–2024)" if m["period"] == "hist" else m["period"]
+            sc_label = f" · {m['scenario']}" if m.get("scenario") else ""
+            story.append(Paragraph(f"{m['species']} — {period_label}{sc_label}", styles["h3"]))
+            img = Image(io.BytesIO(m["map_png"]), width=14 * cm, height=12.25 * cm)
+            img.hAlign = "LEFT"
+            story.append(img)
+            story.append(Spacer(1, 0.6 * cm))
 
     def _page_cb(canvas, doc):
         _on_page(canvas, doc, level, date_str)

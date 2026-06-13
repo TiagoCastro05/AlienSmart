@@ -634,15 +634,39 @@ async function generateAIReport() {
   }
   document.getElementById("pdfButton").disabled = false;
 }
-function exportPdf() {
+async function exportPdf() {
   const level = document.getElementById("reportLevel").value;
-  const activeSpeciesList = Object.keys(activeSpeciesConfigs);
-  const species = activeSpeciesList.length === 1 ? activeSpeciesList[0] : null;
-  const municipality = activeMunicipalities.length === 1 ? activeMunicipalities[0] : null;
+  const municipality = activeMunicipalities.length > 0 ? activeMunicipalities[0] : null;
+
+  const speciesConfigs = Object.entries(activeSpeciesConfigs).map(([sp, cfg]) => ({
+    species: sp,
+    period: cfg.period,
+    scenario: cfg.scenario,
+    binary: true,
+  }));
+
   const params = new URLSearchParams({ level });
-  if (species) params.append("species", species);
   if (municipality) params.append("municipality", municipality);
-  window.open(`${API_URL}/report/pdf?${params}`, "_blank");
+
+  try {
+    const resp = await fetch(`${API_URL}/report/pdf?${params}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ species_configs: speciesConfigs }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `relatorio_${level}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert("Erro ao exportar PDF: " + e.message);
+  }
 }
 
 document.getElementById("templateButton").addEventListener("click", generateTemplateReport);

@@ -144,11 +144,20 @@ def get_summary(species: str = None, municipality: str = None):
 # Relatórios
 # ---------------------------------------------------------------------------
 
+COLORMAP_STOPS: dict[str, list[str]] = {
+    "Greens5": ["#edf8e9", "#bae4b3", "#74c476", "#31a354", "#006d2c"],
+    "YlOrRd":  ["#ffffcc", "#fed976", "#fd8d3c", "#e31a1c", "#800026"],
+    "Blues":   ["#eff3ff", "#bdd7e7", "#6baed6", "#3182bd", "#08519c"],
+    "RdPu":    ["#feebe2", "#fbb4b9", "#f768a1", "#ae017e", "#49006a"],
+}
+
+
 class SpeciesConfigItem(BaseModel):
     species: str
     period: str = "hist"
     scenario: str = "ssp370"
     binary: bool = True
+    colormap: str = "Greens5"
 
 
 class ReportRequestBody(BaseModel):
@@ -238,76 +247,75 @@ def build_report_payload(
     return {"source": source, "report": report, "validation": validation, "summary": summary, "level": level}
 
 
-def build_raster_map_image(species: str, period: str = "hist", scenario: str = None) -> bytes | None:
-    """Renderiza o raster SDM de uma espécie como PNG com fronteira de Portugal e legenda."""
+QGIS_PYTHON = Path(r"C:\Program Files\QGIS 3.44.11\bin\python3.exe")
+QGIS_ENV = {
+    "OSGEO4W_ROOT":    r"C:\Program Files\QGIS 3.44.11",
+    "QGIS_PREFIX_PATH": r"C:/Program Files/QGIS 3.44.11/apps/qgis-ltr",
+    "PATH": (
+        r"C:\Program Files\QGIS 3.44.11\bin"
+        r";C:\Program Files\QGIS 3.44.11\apps\qgis-ltr\bin"
+        r";C:\Program Files\QGIS 3.44.11\apps\Qt5\bin"
+        r";C:\Windows\system32;C:\Windows"
+    ),
+    "QT_PLUGIN_PATH": (
+        r"C:\Program Files\QGIS 3.44.11\apps\qgis-ltr\qtplugins"
+        r";C:\Program Files\QGIS 3.44.11\apps\qt5\plugins"
+    ),
+    "PYTHONPATH":  r"C:\Program Files\QGIS 3.44.11\apps\qgis-ltr\python",
+    "PYTHONHOME":  r"C:\Program Files\QGIS 3.44.11\apps\Python312",
+    "GDAL_DATA":   r"C:\Program Files\QGIS 3.44.11\share\gdal",
+    "PROJ_LIB":    r"C:\Program Files\QGIS 3.44.11\share\proj",
+    "QT_QPA_PLATFORM": "offscreen",
+}
+_QGIS_RENDER_SCRIPT = Path(__file__).parent / "qgis_render.py"
+
+
+def build_raster_map_image(
+    species: str,
+    period: str = "hist",
+    scenario: str = None,
+    colormap_name: str = "Greens5",
+) -> bytes | None:
+    """Renderiza o raster SDM via PyQGIS (subprocesso) — basemap OSM + cores do utilizador."""
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
-    logger.info("[raster map] species=%r period=%r scenario=%r → %d ficheiro(s)", species, period, scenario, len(files))
+    logger.info("[raster map] species=%r period=%r scenario=%r cmap=%r → %d ficheiro(s)",
+                species, period, scenario, colormap_name, len(files))
     if not files:
         logger.warning("[raster map] Nenhum TIF encontrado para %r / %r / %r", species, period, scenario)
         return None
-    logger.info("[raster map] A usar: %s", files[0])
+
+    import subprocess, tempfile
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        out_png = tmp.name
+
+    args = [
+        str(QGIS_PYTHON),
+        str(_QGIS_RENDER_SCRIPT),
+        files[0],
+        out_png,
+        colormap_name,
+        species,
+        period,
+    ]
+    if scenario:
+        args.append(scenario)
+
     try:
-        import numpy as np
-        import rasterio as rio
-        from matplotlib.patches import Patch
-        from matplotlib.colors import ListedColormap, BoundaryNorm
-        from rasterio.plot import show as rio_show
-        import geopandas as gpd
-
-        fig, ax = plt.subplots(figsize=(8, 7), facecolor="white")
-
-        with rio.open(files[0]) as src:
-            data = src.read(1).astype(float)
-            nodata = src.nodata
-            transform = src.transform
-            crs_epsg = src.crs.to_epsg()
-
-            if nodata is not None:
-                data[(data == 0) | (data == nodata)] = np.nan
-            else:
-                data[data == 0] = np.nan
-
-        # Fundo cinzento para "não adequado"; verde escuro para "adequado"
-        cmap = ListedColormap(["#e8e8e8", "#2d6a4f"])
-        norm = BoundaryNorm([0, 0.5, 1.5], ncolors=2)
-
-        # -1 para NaN → fica abaixo do norm → set_under(alpha=0) → transparente
-        data_render = np.where(np.isnan(data), -1, data)
-        cmap.set_under(alpha=0)
-
-        rio_show((data_render, transform), ax=ax, cmap=cmap, norm=norm)
-
-        # Fronteira de Portugal (+ Espanha para contexto)
-        try:
-            world = gpd.read_file(gpd.datasets.get_path("naturalearth_lowres"))
-            iberia = world[world["name"].isin(["Portugal", "Spain"])]
-            if crs_epsg and crs_epsg != 4326:
-                iberia = iberia.to_crs(epsg=crs_epsg)
-            iberia.plot(ax=ax, facecolor="none", edgecolor="#333333", linewidth=0.8, zorder=5)
-        except Exception:
-            pass
-
-        period_label = "Histórico (1981–2024)" if period == "hist" else period
-        scenario_label = f" · {scenario}" if scenario and period != "hist" else ""
-        ax.set_title(f"{species}\n{period_label}{scenario_label}", fontsize=10, fontweight="bold", pad=8)
-        ax.set_axis_off()
-        ax.legend(
-            handles=[
-                Patch(facecolor="#2d6a4f", label="Área adequada"),
-                Patch(facecolor="#e8e8e8", edgecolor="#aaa", label="Não adequado"),
-            ],
-            loc="lower left", fontsize=8, framealpha=0.9,
-            title="Legenda", title_fontsize=8,
+        result = subprocess.run(
+            args, env=QGIS_ENV, capture_output=True, text=True, timeout=120
         )
-
-        fig.tight_layout()
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="white")
-        plt.close(fig)
-        buf.seek(0)
-        return buf.read()
+        if result.stderr:
+            logger.debug("[qgis_render stderr] %s", result.stderr[:500])
+        out_path = Path(out_png)
+        if out_path.exists() and out_path.stat().st_size > 1000:
+            data = out_path.read_bytes()
+            out_path.unlink(missing_ok=True)
+            logger.info("[raster map] PNG gerado via PyQGIS: %d bytes", len(data))
+            return data
+        logger.warning("[raster map] PNG não gerado ou vazio para %r", species)
+        return None
     except Exception as exc:
-        logger.warning("Erro ao gerar mapa raster para %s: %s", species, exc)
+        logger.warning("[raster map] Erro no subprocesso PyQGIS: %s", exc, exc_info=True)
         return None
 
 
@@ -340,27 +348,17 @@ def build_charts(summary: dict) -> list[bytes]:
 def _build_species_maps(configs: list) -> list[dict]:
     maps = []
     for cfg in configs:
-        sp = cfg["species"]
-        all_files = get_raster_files(species=sp, binary=True)
-        seen: set[tuple] = set()
-        for filepath in sorted(all_files):
-            parsed = parse_raster_filename(Path(filepath).name)
-            if not parsed:
-                continue
-            period   = parsed["period"]
-            scenario = parsed.get("scenario")
-            key = (period, scenario)
-            if key in seen:
-                continue
-            seen.add(key)
-            sc = scenario if period != "hist" else None
-            logger.info("[PDF maps] A gerar mapa: especie=%r period=%r scenario=%r", sp, period, sc)
-            png = build_raster_map_image(sp, period, sc)
-            if png:
-                logger.info("[PDF maps] Mapa gerado: %d bytes", len(png))
-                maps.append({"species": sp, "period": period, "scenario": sc, "map_png": png})
-            else:
-                logger.warning("[PDF maps] Mapa devolveu None para %r / %r / %r", sp, period, sc)
+        sp            = cfg["species"]
+        period        = cfg.get("period", "hist")
+        scenario      = cfg.get("scenario") if period != "hist" else None
+        colormap_name = cfg.get("colormap", "Greens5")
+        logger.info("[PDF maps] A gerar mapa: especie=%r period=%r scenario=%r cmap=%r", sp, period, scenario, colormap_name)
+        png = build_raster_map_image(sp, period, scenario, colormap_name=colormap_name)
+        if png:
+            logger.info("[PDF maps] Mapa gerado: %d bytes", len(png))
+            maps.append({"species": sp, "period": period, "scenario": scenario, "map_png": png})
+        else:
+            logger.warning("[PDF maps] Mapa devolveu None para %r / %r / %r", sp, period, scenario)
     logger.info("[PDF maps] Total mapas gerados: %d", len(maps))
     return maps
 

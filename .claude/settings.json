@@ -3,7 +3,12 @@
     "allow": [
       "Bash(curl -s -X POST \"http://localhost:8000/report/pdf?level=tecnico\" -H \"Content-Type: application/json\" -d \"{\\\\\"species_configs\\\\\":[]}\" -o /dev/null -w \"%{http_code}\")",
       "Bash(.venv/Scripts/python.exe -c \"from pdf_builder import build_pdf; print\\('ok'\\)\")",
-      "Bash(.venv/Scripts/python.exe -c ' *)"
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/pip install *)",
+      "Bash(.venv/Scripts/python.exe -c \"import contextily; print\\(contextily.__version__\\)\")",
+      "Bash(where qgis *)",
+      "Read(//c/Program Files/**)",
+      "Read(//c//**)"
     ]
   }
 }

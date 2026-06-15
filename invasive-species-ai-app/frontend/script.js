@@ -642,7 +642,8 @@ async function exportPdf() {
     species: sp,
     period: cfg.period,
     scenario: cfg.scenario,
-    binary: true,
+    binary: cfg.binary ?? true,
+    colormap: cfg.colormap ?? "Greens5",
   }));
 
   const params = new URLSearchParams({ level });

@@ -241,8 +241,11 @@ def build_report_payload(
 def build_raster_map_image(species: str, period: str = "hist", scenario: str = None) -> bytes | None:
     """Renderiza o raster SDM de uma espécie como PNG com fronteira de Portugal e legenda."""
     files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
+    logger.info("[raster map] species=%r period=%r scenario=%r → %d ficheiro(s)", species, period, scenario, len(files))
     if not files:
+        logger.warning("[raster map] Nenhum TIF encontrado para %r / %r / %r", species, period, scenario)
         return None
+    logger.info("[raster map] A usar: %s", files[0])
     try:
         import numpy as np
         import rasterio as rio
@@ -337,12 +340,28 @@ def build_charts(summary: dict) -> list[bytes]:
 def _build_species_maps(configs: list) -> list[dict]:
     maps = []
     for cfg in configs:
-        sp     = cfg["species"]
-        period = cfg.get("period", "hist")
-        sc     = cfg.get("scenario") if period != "hist" else None
-        png    = build_raster_map_image(sp, period, sc)
-        if png:
-            maps.append({"species": sp, "period": period, "scenario": sc, "map_png": png})
+        sp = cfg["species"]
+        all_files = get_raster_files(species=sp, binary=True)
+        seen: set[tuple] = set()
+        for filepath in sorted(all_files):
+            parsed = parse_raster_filename(Path(filepath).name)
+            if not parsed:
+                continue
+            period   = parsed["period"]
+            scenario = parsed.get("scenario")
+            key = (period, scenario)
+            if key in seen:
+                continue
+            seen.add(key)
+            sc = scenario if period != "hist" else None
+            logger.info("[PDF maps] A gerar mapa: especie=%r period=%r scenario=%r", sp, period, sc)
+            png = build_raster_map_image(sp, period, sc)
+            if png:
+                logger.info("[PDF maps] Mapa gerado: %d bytes", len(png))
+                maps.append({"species": sp, "period": period, "scenario": sc, "map_png": png})
+            else:
+                logger.warning("[PDF maps] Mapa devolveu None para %r / %r / %r", sp, period, sc)
+    logger.info("[PDF maps] Total mapas gerados: %d", len(maps))
     return maps
 
 
@@ -398,7 +417,8 @@ def export_report_pdf(
     payload = build_report_payload(normalized_level, species=species, municipality=municipality, species_configs=configs)
     filters = {"species": [species] if species else [], "municipality": municipality}
     species_maps = _build_species_maps(configs)
-    pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps)
+    charts = build_charts(payload["summary"])
+    pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps, charts=charts)
     filename = f"relatorio_{normalized_level}.pdf"
     return Response(
         content=pdf_bytes,
@@ -419,7 +439,8 @@ def export_report_pdf_post(
     payload = build_report_payload(normalized_level, species=species, municipality=municipality, species_configs=configs)
     filters = {"species": [c["species"] for c in configs], "municipality": municipality}
     species_maps = _build_species_maps(configs)
-    pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps)
+    charts = build_charts(payload["summary"])
+    pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps, charts=charts)
     filename = f"relatorio_{normalized_level}.pdf"
     return Response(
         content=pdf_bytes,

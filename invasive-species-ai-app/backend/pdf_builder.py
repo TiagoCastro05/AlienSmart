@@ -165,6 +165,7 @@ def build_pdf(
     summary: dict | None = None,
     filters: dict | None = None,
     species_maps: list[dict] | None = None,
+    charts: list[bytes] | None = None,
 ) -> bytes:
     """
     Gera PDF profissional a partir do markdown gerado pelo Ollama.
@@ -264,6 +265,17 @@ def build_pdf(
         # Parágrafo normal
         story.append(Paragraph(_fmt(stripped), styles["body"]))
         i += 1
+
+    # Gráficos estatísticos (PNG pré-renderizados em main.py)
+    if charts:
+        story.append(Spacer(1, 0.4 * cm))
+        story.append(Paragraph("Análise Estatística", styles["h2"]))
+        story.append(HRFlowable(width="100%", thickness=1.2, color=GREEN_MID, spaceAfter=6))
+        for chart_png in charts:
+            img = Image(io.BytesIO(chart_png), width=14 * cm, height=7.5 * cm)
+            img.hAlign = "LEFT"
+            story.append(img)
+            story.append(Spacer(1, 0.4 * cm))
 
     # Mapas raster (PNG pré-renderizados em main.py)
     if species_maps:

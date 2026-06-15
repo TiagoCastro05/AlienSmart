@@ -201,9 +201,48 @@ def build_pdf(
             story.append(HRFlowable(width="100%", thickness=0.8,
                                     color=GREEN_LIGHT, spaceAfter=6))
 
+    # Índice: espécie (lowercase) → dict com png e flag "já inserido"
+    from reportlab.lib.utils import ImageReader as _IR
+
+    def _map_image_flowables(m: dict) -> list:
+        """Gera os flowables do mapa (título + imagem) para uma entrada species_maps."""
+        period_label = "Histórico (1981–2024)" if m["period"] == "hist" else m["period"]
+        sc_label = f" · {m['scenario']}" if m.get("scenario") else ""
+        _r = _IR(io.BytesIO(m["map_png"]))
+        _pw, _ph = _r.getSize()
+        _max_w = 14 * cm
+        _max_h = 18 * cm  # nunca ultrapassar a altura da página
+        _dh = _max_w * (_ph / _pw)
+        if _dh > _max_h:
+            _dh = _max_h
+            _max_w = _max_h * (_pw / _ph)
+        return [
+            Spacer(1, 0.3 * cm),
+            Paragraph(f"Mapa de Distribuição — {period_label}{sc_label}", styles["h3"]),
+            Image(io.BytesIO(m["map_png"]), width=_max_w, height=_dh),
+            Spacer(1, 0.5 * cm),
+        ]
+
+    map_lookup: dict[str, dict] = {}
+    if species_maps:
+        for m in species_maps:
+            map_lookup[m["species"].lower()] = {"data": m, "inserted": False}
+
+    def _try_insert_map(heading_text: str) -> None:
+        """Se o heading contiver o nome de uma espécie com mapa, insere o mapa agora."""
+        h_lower = heading_text.lower()
+        for sp_key, entry in map_lookup.items():
+            if not entry["inserted"] and sp_key in h_lower:
+                for fl in _map_image_flowables(entry["data"]):
+                    story.append(fl)
+                entry["inserted"] = True
+                break
+
     # Parser de markdown
     lines = report_text.split("\n")
     i = 0
+    pending_map_after_table: dict | None = None  # mapa a inserir após a próxima tabela
+
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
@@ -219,6 +258,7 @@ def build_pdf(
             story.append(Paragraph(_fmt(text), styles["h1"]))
             story.append(HRFlowable(width="100%", thickness=1.2,
                                     color=GREEN_MID, spaceAfter=4))
+            _try_insert_map(text)
             i += 1
             continue
 
@@ -228,23 +268,36 @@ def build_pdf(
             story.append(Paragraph(text, styles["h1"]))
             story.append(HRFlowable(width="100%", thickness=1.2,
                                     color=GREEN_MID, spaceAfter=4))
+            _try_insert_map(text)
             i += 1
             continue
 
         # H2
         if stripped.startswith("## "):
-            story.append(Paragraph(_fmt(stripped[3:]), styles["h2"]))
+            text = stripped[3:]
+            story.append(Paragraph(_fmt(text), styles["h2"]))
+            _try_insert_map(text)
             i += 1
             continue
 
         # H3
         if stripped.startswith("### "):
-            story.append(Paragraph(_fmt(stripped[4:]), styles["h3"]))
+            text = stripped[4:]
+            story.append(Paragraph(_fmt(text), styles["h3"]))
+            _try_insert_map(text)
             i += 1
             continue
 
-        # Tabela markdown
+        # Tabela markdown — insere mapa pendente ANTES da tabela
         if stripped.startswith("|"):
+            # Verificar se há mapa ainda não inserido para a secção actual
+            for sp_key, entry in map_lookup.items():
+                if not entry["inserted"]:
+                    for fl in _map_image_flowables(entry["data"]):
+                        story.append(fl)
+                    entry["inserted"] = True
+                    break
+
             table_lines = []
             while i < len(lines) and lines[i].strip().startswith("|"):
                 table_lines.append(lines[i])
@@ -266,7 +319,14 @@ def build_pdf(
         story.append(Paragraph(_fmt(stripped), styles["body"]))
         i += 1
 
-    # Gráficos estatísticos (PNG pré-renderizados em main.py)
+    # Mapas ainda não inseridos (espécies não mencionadas no texto)
+    for entry in map_lookup.values():
+        if not entry["inserted"]:
+            for fl in _map_image_flowables(entry["data"]):
+                story.append(fl)
+            entry["inserted"] = True
+
+    # Gráficos estatísticos
     if charts:
         story.append(Spacer(1, 0.4 * cm))
         story.append(Paragraph("Análise Estatística", styles["h2"]))
@@ -276,20 +336,6 @@ def build_pdf(
             img.hAlign = "LEFT"
             story.append(img)
             story.append(Spacer(1, 0.4 * cm))
-
-    # Mapas raster (PNG pré-renderizados em main.py)
-    if species_maps:
-        story.append(Spacer(1, 0.4 * cm))
-        story.append(Paragraph("Mapas de Distribuição Potencial", styles["h2"]))
-        story.append(HRFlowable(width="100%", thickness=1.2, color=GREEN_MID, spaceAfter=6))
-        for m in species_maps:
-            period_label = "Histórico (1981–2024)" if m["period"] == "hist" else m["period"]
-            sc_label = f" · {m['scenario']}" if m.get("scenario") else ""
-            story.append(Paragraph(f"{m['species']} — {period_label}{sc_label}", styles["h3"]))
-            img = Image(io.BytesIO(m["map_png"]), width=14 * cm, height=12.25 * cm)
-            img.hAlign = "LEFT"
-            story.append(img)
-            story.append(Spacer(1, 0.6 * cm))
 
     def _page_cb(canvas, doc):
         _on_page(canvas, doc, level, date_str)

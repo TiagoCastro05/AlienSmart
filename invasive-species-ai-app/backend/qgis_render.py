@@ -80,8 +80,17 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
     transform = QgsCoordinateTransform(crs_src, crs_dst, QgsProject.instance())
     extent_3857 = transform.transformBoundingBox(raster_layer.extent())
 
-    # ── Renderização ─────────────────────────────────────────────────────────
-    W, H = 900, 1000
+    # ── Dimensões baseadas no aspeto real da extensão geográfica ────────────
+    geo_w = extent_3857.width()
+    geo_h = extent_3857.height()
+    TARGET_LONG = 900  # lado maior em píxeis
+    if geo_w >= geo_h:
+        W = TARGET_LONG
+        H = max(1, round(TARGET_LONG * geo_h / geo_w))
+    else:
+        H = TARGET_LONG
+        W = max(1, round(TARGET_LONG * geo_w / geo_h))
+
     # Em QgsMapSettings, a primeira layer da lista é desenhada por CIMA
     layers = [raster_layer]
     if basemap.isValid():

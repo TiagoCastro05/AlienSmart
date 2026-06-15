@@ -302,7 +302,8 @@ def build_raster_map_image(
 
     try:
         result = subprocess.run(
-            args, env=QGIS_ENV, capture_output=True, text=True, timeout=120
+            args, env=QGIS_ENV, capture_output=True, text=True, timeout=120,
+            cwd=tempfile.gettempdir(),
         )
         if result.stderr:
             logger.debug("[qgis_render stderr] %s", result.stderr[:500])

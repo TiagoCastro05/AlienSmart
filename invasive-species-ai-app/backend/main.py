@@ -52,6 +52,39 @@ app = FastAPI(
 
 app.include_router(tiles_router)
 
+# ============================================================================
+# HUB CENTRAL DE PLUGINS / APIs EXTENSÍVEIS
+# ============================================================================
+try:
+    # Quando criares novos plugins na pasta plugins/, importa-os aqui:
+    from plugins import weather_plugin  # , gdal_plugin, biodiversity_plugin
+
+    ACTIVE_PLUGINS = [
+        weather_plugin,
+    ]
+except ImportError:
+    ACTIVE_PLUGINS = []
+    print("⚠️ Pasta 'plugins' ou 'weather_plugin.py' ainda não foram criados.")
+
+# 1. Registar automaticamente as rotas de todos os plugins ativos no FastAPI
+for plugin in ACTIVE_PLUGINS:
+    if hasattr(plugin, "router"):
+        app.include_router(plugin.router)
+
+# 2. Função para o 'agent_report.py' recolher as ferramentas de IA automaticamente
+def get_plugin_ai_tools():
+    ai_tools = []
+    for plugin in ACTIVE_PLUGINS:
+        for attr_name in dir(plugin):
+            attr = getattr(plugin, attr_name)
+            # Deteta funções decoradas com @tool do LangChain
+            if hasattr(attr, "is_agent_tool") or type(attr).__name__ == "WrappedTool":
+                ai_tools.append(attr)
+    return ai_tools
+# ============================================================================
+
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

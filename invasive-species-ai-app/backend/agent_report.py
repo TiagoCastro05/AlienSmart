@@ -433,6 +433,44 @@ def generate_agent_report(
         except Exception:
             extra_data["visao_geral_sdm"] = {"nota": "Dados SDM não disponíveis de momento."}
 
+# ── INJEÇÃO AUTOMÁTICA DE DADOS DOS PLUGINS ──────────────────────────────
+    try:
+        from plugins import ACTIVE_PLUGINS
+        extra_data["plugins_externos"] = {}
+        
+        for plugin in ACTIVE_PLUGINS:
+            for attr_name in dir(plugin):
+                attr = getattr(plugin, attr_name)
+                # Verifica se é uma @tool do LangChain
+                if hasattr(attr, "is_agent_tool") or type(attr).__name__ == "WrappedTool":
+                    try:
+                        # Executa a tool passando o município se ele existir
+                        if municipality:
+                            res = attr.invoke({"municipality": municipality})
+                        else:
+                            res = attr.invoke({})
+                        
+                        # Tenta converter em JSON se for string, senão guarda direto
+                        try:
+                            extra_data["plugins_externos"][attr.name] = json.loads(res)
+                        except Exception:
+                            extra_data["plugins_externos"][attr.name] = res
+                    except Exception as tool_err:
+                        # Se falhar com argumentos (ex: a tool não pedia município), tenta sem argumentos
+                        try:
+                            res = attr.invoke({})
+                            extra_data["plugins_externos"][attr.name] = json.loads(res) if isinstance(res, str) else res
+                        except Exception:
+                            extra_data["plugins_externos"][attr.name] = f"Disponível (Erro ao invocar: {tool_err})"
+    except Exception as plugin_err:
+        logger.warning("Não foi possível processar os plugins: %s", plugin_err)
+    # ─────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
     municipality_note = f" no município **{municipality}**" if municipality else " em Portugal"
     species_list = [cfg["species"] for cfg in species_configs] if species_configs else []
     species_note = f" sobre as espécies: {', '.join(species_list)}" if species_list else " (visão geral)"

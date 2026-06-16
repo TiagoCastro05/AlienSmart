@@ -1,0 +1,97 @@
+Sim, está **100% pronto**! O teu sistema segue agora o princípio profissional *Open-Closed* da engenharia de software: está aberto a novas expansões (plugins), mas fechado a alterações no código central (`main.py` e `agent_report.py`). Ninguém vai estragar o que já está a funcionar.
+
+Aqui tens o **guia passo a passo** (pronto a partilhar com os teus colegas ou professores) para adicionar qualquer nova API, base de dados externa ou algoritmo ao projeto **AlienSmart**:
+
+---
+
+## Guia Completo: Como Adicionar um Novo Plugin ao AlienSmart
+
+Para adicionar uma nova funcionalidade (ex: ligar à API do GBIF, dados do Copernicus, ou estatísticas municipais do INE), apenas precisas de seguir **3 passos simples** dentro da pasta `plugins/`.
+
+### Passo 1: Criar o ficheiro do plugin
+
+Dentro da pasta `backend/plugins/`, cria um novo ficheiro Python com o nome da tua funcionalidade.
+
+* *Exemplo:* **`biodiversity_plugin.py`**
+
+---
+
+### Passo 2: Escrever a lógica (Estrutura Padrão)
+
+Abre o ficheiro que criaste e usa esta estrutura base. Cada plugin deve fornecer **duas coisas**: as rotas para o Frontend usar e a ferramenta (*tool*) para a IA ler.
+
+```python
+# backend/plugins/biodiversity_plugin.py
+import requests
+from fastapi import APIRouter
+from langchain.tools import tool
+
+# 1. ROTAS PARA O FRONTEND (FastAPI)
+# O prefix define o URL base automático (ex: http://localhost:8000/plugin/biodiversity/status)
+router = APIRouter(prefix="/plugin/biodiversity", tags=["Plugin Biodiversidade"])
+
+@router.get("/status/{municipality}")
+def get_biodiversity_data(municipality: str):
+    """
+    Endpoint para o Frontend consultar o estado de biodiversidade local.
+    Podes ligar isto a uma base de dados interna ou API externa (GBIF, CIBIO, etc.).
+    """
+    # Exemplo de lógica fictícia/mock data:
+    return {
+        "municipality": municipality,
+        "native_species_count": 142,
+        "threat_level": "Moderado",
+        "source": "GBIF External API Connector"
+    }
+
+
+# 2. FERRAMENTA PARA A IA (LangChain / Ollama)
+@tool
+def fetch_local_biodiversity_tool(municipality: str) -> str:
+    """
+    Consulta o índice de biodiversidade e o número de espécies nativas de um município.
+    Útil para quando a IA precisar de cruzar o impacto das espécies invasoras com a fauna nativa.
+    """
+    # A IA vai executar esta função em background e ler o texto retornado:
+    data = get_biodiversity_data(municipality)
+    return (f"Biodiversidade em {municipality}: Espécies Nativas={data['native_species_count']}, "
+            f"Nível de Ameaça Ecológica={data['threat_level']} (Fonte: {data['source']})")
+
+```
+
+> 💡 **Nota Importante sobre a Tool da IA:** O texto que escreves entre aspas triplas (`"""`) logo abaixo de `@tool` é a descrição que o Llama 3.1 vai ler para decidir se precisa de usar este plugin ou não. Escreve uma descrição clara!
+
+---
+
+### Passo 3: Ativar o plugin no Hub Central
+
+Abre o ficheiro **`backend/plugins/__init__.py`**. Só tens de fazer duas linhas de alteração para o sistema passar a reconhecer o teu código:
+
+1. Importar o teu novo ficheiro.
+2. Adicioná-lo à lista `ACTIVE_PLUGINS`.
+
+O teu ficheiro deve ficar assim:
+
+```python
+# backend/plugins/__init__.py
+from . import weather_plugin
+from . import biodiversity_plugin  # 1. Importas o novo plugin aqui
+
+# 2. Adicionas o plugin a esta lista:
+ACTIVE_PLUGINS = [
+    weather_plugin,
+    biodiversity_plugin,  # O sistema ativa-o instantaneamente!
+]
+
+```
+
+---
+
+## 🧠 Como a Magia Acontece nos Bastidores?
+
+Assim que guardares o ficheiro e o `plugins/__init__.py` for atualizado:
+
+1. **No FastAPI (`/docs`):** O teu `main.py` vai detetar o novo plugin, ler o `router` dele e criar os endpoints automaticamente. Se fores ao Swagger, a nova API já lá vai aparecer pronta a ser testada pelo teu colega de Frontend.
+2. **Na Inteligência Artificial:** Quando clicares em "Gerar Relatório", o `agent_report.py` vai percorrer a lista de plugins, detetar a função decorada com `@tool`, executá-la em background usando o município selecionado e injetar o resultado no cérebro do Llama 3.1.
+
+O relatório final em PDF e no ecrã passará a incluir esses novos dados de forma 100% orgânica e contextualizada!

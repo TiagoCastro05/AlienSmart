@@ -298,7 +298,6 @@ QGIS_ENV = {
     "PYTHONHOME":  r"C:\Program Files\QGIS 3.44.11\apps\Python312",
     "GDAL_DATA":   r"C:\Program Files\QGIS 3.44.11\share\gdal",
     "PROJ_LIB":    r"C:\Program Files\QGIS 3.44.11\share\proj",
-    "QT_QPA_PLATFORM": "offscreen",
 }
 _QGIS_RENDER_SCRIPT = Path(__file__).parent / "qgis_render.py"
 

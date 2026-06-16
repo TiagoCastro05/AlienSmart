@@ -22,8 +22,8 @@ from qgis.core import (
     QgsCoordinateTransform,
     QgsProject,
 )
-from qgis.PyQt.QtGui import QColor, QImage, QPainter
-from qgis.PyQt.QtCore import QSize
+from qgis.PyQt.QtGui import QColor, QImage, QPainter, QFont, QPen, QBrush
+from qgis.PyQt.QtCore import QSize, QRect, Qt
 
 COLORMAP_STOPS = {
     "Greens5": ["#edf8e9", "#bae4b3", "#74c476", "#31a354", "#006d2c"],
@@ -65,7 +65,8 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
 
     # QgsPalettedRasterRenderer — ideal para rasters binários (0/1)
     stops = COLORMAP_STOPS.get(colormap_name, COLORMAP_STOPS["Greens5"])
-    suitable_color = hex_to_qcolor(stops[-1], alpha=190)
+    LEGEND_ALPHA = 175  # semi-transparente, deixa o basemap ler por baixo
+    suitable_color = hex_to_qcolor(stops[-1], alpha=LEGEND_ALPHA)
 
     classes = [
         QgsPalettedRasterRenderer.Class(0, QColor(0, 0, 0, 0), "Não adequado"),
@@ -73,6 +74,10 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
     ]
     renderer = QgsPalettedRasterRenderer(raster_layer.dataProvider(), 1, classes)
     raster_layer.setRenderer(renderer)
+
+    # Basemap mais nítido (antes ficava demasiado lavado/branco)
+    if basemap.isValid():
+        basemap.renderer().setOpacity(0.9)
 
     # ── Reprojectar extensão do raster para EPSG:3857 ───────────────────────
     crs_src = raster_layer.crs()
@@ -104,16 +109,67 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
     settings.setBackgroundColor(QColor(240, 240, 240))
     settings.setOutputDpi(150)
 
-    img = QImage(QSize(W, H), QImage.Format.Format_ARGB32_Premultiplied)
-    img.fill(QColor(240, 240, 240))
-    painter = QPainter(img)
+    map_img = QImage(QSize(W, H), QImage.Format.Format_ARGB32_Premultiplied)
+    map_img.fill(QColor(240, 240, 240))
+    painter = QPainter(map_img)
     job = QgsMapRendererCustomPainterJob(settings, painter)
     job.start()
     job.waitForFinished()
     painter.end()
 
-    img.save(output_png)
-    print(f"[qgis_render] PNG guardado: {output_png} ({img.width()}x{img.height()})")
+    # ── Legenda num painel próprio à direita do mapa ─────────────────────────
+    PANEL_W = max(160, W // 4)
+    final_img = QImage(QSize(W + PANEL_W, H), QImage.Format.Format_ARGB32_Premultiplied)
+    final_img.fill(QColor(255, 255, 255))
+
+    canvas = QPainter(final_img)
+    canvas.setRenderHint(QPainter.Antialiasing)
+    canvas.drawImage(0, 0, map_img)
+
+    # Separador entre mapa e legenda
+    canvas.setPen(QPen(QColor(200, 200, 200), 1))
+    canvas.drawLine(W, 0, W, H)
+
+    # Conteúdo da legenda
+    pad   = 16
+    sw    = 22
+    sh    = 16
+    font_title = QFont("Arial", max(9, PANEL_W // 14), QFont.Bold)
+    font_label = QFont("Arial", max(8, PANEL_W // 16))
+
+    lx = W + pad
+    ly = pad + 10
+
+    canvas.setFont(font_title)
+    canvas.setPen(QPen(QColor(30, 30, 30)))
+    canvas.drawText(lx, ly, "Legenda")
+    ly += 16
+
+    canvas.setPen(QPen(QColor(180, 180, 180)))
+    canvas.drawLine(lx, ly, W + PANEL_W - pad, ly)
+    ly += 24
+
+    canvas.setFont(font_label)
+    fm = canvas.fontMetrics()
+
+    entries = [
+        (suitable_color, "Adequado"),
+        (QColor(0, 0, 0, 0), "Não adequado"),
+    ]
+    for color, label in entries:
+        canvas.setBrush(QBrush(color) if color.alpha() > 0 else QBrush(Qt.NoBrush))
+        canvas.setPen(QPen(QColor(80, 80, 80), 1))
+        canvas.drawRect(QRect(lx, ly, sw, sh))
+
+        canvas.setPen(QPen(QColor(30, 30, 30)))
+        text_y = ly + sh - (sh - fm.ascent()) // 2 - fm.descent() // 2
+        canvas.drawText(lx + sw + 8, text_y, label)
+        ly += sh + 16
+
+    canvas.end()
+
+    final_img.save(output_png)
+    print(f"[qgis_render] PNG guardado: {output_png} ({final_img.width()}x{final_img.height()})")
 
     qgs.exitQgis()
 

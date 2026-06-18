@@ -1,0 +1,28 @@
+{
+  "Acacia_longifolia_2978730_hist_bin_eur__Greens5": {
+    "map_name": "Acacia_longifolia_2978730_hist_bin_eur",
+    "png_name": "Acacia_longifolia_2978730_hist_bin_eur_Greens5.png",
+    "bounds": {
+      "south": 36.953264,
+      "west": -9.519792,
+      "north": 42.15703,
+      "east": -6.19208
+    },
+    "colormap": "Greens5",
+    "last_modified": 1779980163.1485944,
+    "raster_hash": "3cdcdbdb1e66005c93379bec9466f98d99773088"
+  },
+  "Acacia_melanoxylon_2979000_hist_bin_eur__YlOrRd": {
+    "map_name": "Acacia_melanoxylon_2979000_hist_bin_eur",
+    "png_name": "Acacia_melanoxylon_2979000_hist_bin_eur_YlOrRd.png",
+    "bounds": {
+      "south": 36.953264,
+      "west": -9.519792,
+      "north": 42.15703,
+      "east": -6.19208
+    },
+    "colormap": "YlOrRd",
+    "last_modified": 1779980163.2975416,
+    "raster_hash": "05755587c71eff2c04f90cc2f04fdb4aed3b750c"
+  }
+}

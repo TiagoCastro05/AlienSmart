@@ -35,6 +35,7 @@ from raster_tools import (
     compute_combined_invasive_raster,
 )
 from raster_tiles import router as tiles_router
+from municipio_raster import clip_raster_to_municipio, list_municipios
 from services.observation_service import get_observations
 from services.report_service import save_report
 
@@ -280,6 +281,50 @@ def build_template_report(summary: dict, level: str) -> str:
     )
 
 
+def build_municipio_area_section(species_configs: list, municipality: str) -> str:
+    """
+    Gera uma secção markdown com a área adequada de cada espécie DENTRO dos
+    limites do concelho (recorte dos rasters SDM ao polígono do município).
+    Devolve "" se não houver município, espécies ou dados.
+    """
+    if not municipality or not species_configs:
+        return ""
+
+    rows = []
+    for cfg in species_configs:
+        period = cfg.get("period", "hist")
+        scenario = cfg.get("scenario") if period != "hist" else None
+        files = get_raster_files(species=cfg["species"], period=period, scenario=scenario, binary=True)
+        if not files:
+            continue
+        res = clip_raster_to_municipio(files[0], municipality)
+        if "error" in res:
+            logger.warning("[municipio section] %s", res["error"])
+            continue
+        Path(res.pop("clipped_path", "")).unlink(missing_ok=True)
+        Path(res.pop("boundary_path", "")).unlink(missing_ok=True)
+        Path(res.pop("suitable_path", "") or "").unlink(missing_ok=True)
+        rows.append((cfg["species"], res["suitable_area_km2"], res["suitable_pct"]))
+
+    if not rows:
+        return ""
+
+    linhas = [
+        f"## Análise no Município de {municipality}",
+        "",
+        f"A tabela seguinte apresenta a área classificada como adequada para cada "
+        f"espécie **dentro dos limites do concelho de {municipality}**, obtida por "
+        f"recorte (clip) dos modelos SDM ao polígono administrativo do município. "
+        f"As percentagens referem-se à fração da área válida do concelho.",
+        "",
+        "| Espécie | Área adequada no concelho (km²) | % da área do concelho |",
+        "| --- | --- | --- |",
+    ]
+    for sp, km2, pct in rows:
+        linhas.append(f"| {sp} | {km2} | {pct}% |")
+    return "\n".join(linhas)
+
+
 def build_report_payload(
     level: str,
     species: str = None,
@@ -301,6 +346,12 @@ def build_report_payload(
         report = build_template_report(summary, level)
         report = f"{report}\nMotivo tecnico: {str(error)}".strip()
         source = "template_fallback"
+
+    # Acrescenta a análise por município (texto + tabela) antes de validar,
+    # garantindo que o município passa a ser mencionado no relatório.
+    municipio_section = build_municipio_area_section(species_configs or [], municipality)
+    if municipio_section:
+        report = f"{report}\n\n{municipio_section}"
 
     validation = validate_report_text(report, summary, species_configs=species_configs or [])
     save_report(
@@ -437,6 +488,74 @@ def build_combined_map_image(species_configs: list, threshold: int = 2) -> bytes
         Path(combined_tif).unlink(missing_ok=True)
 
 
+def build_municipio_map_image(
+    species: str,
+    municipality: str,
+    period: str = "hist",
+    scenario: str = None,
+    colormap_name: str = "Greens5",
+) -> tuple[bytes | None, dict]:
+    """
+    Recorta o raster SDM de uma espécie aos limites de um município e renderiza
+    o mapa (raster recortado + contorno do concelho) via PyQGIS.
+
+    Returns:
+        (png_bytes | None, stats) — stats inclui área adequada dentro do concelho.
+    """
+    files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
+    if not files:
+        logger.warning("[municipio map] Nenhum TIF para %r / %r / %r", species, period, scenario)
+        return None, {"error": "raster não encontrado"}
+
+    clip = clip_raster_to_municipio(files[0], municipality)
+    if "error" in clip:
+        logger.warning("[municipio map] %s", clip["error"])
+        return None, clip
+
+    import subprocess, tempfile
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        out_png = tmp.name
+
+    args = [
+        str(QGIS_PYTHON),
+        str(_QGIS_RENDER_SCRIPT),
+        clip["clipped_path"],
+        out_png,
+        colormap_name,
+        species,
+        period,
+    ]
+    if scenario:
+        args.append(scenario)
+    args.append(f"--boundary={clip['boundary_path']}")
+    if clip.get("suitable_path"):
+        args.append(f"--suitable={clip['suitable_path']}")
+
+    try:
+        result = subprocess.run(
+            args, env=QGIS_ENV, capture_output=True, text=True, timeout=120,
+            cwd=tempfile.gettempdir(),
+        )
+        if result.stderr:
+            logger.debug("[qgis_render stderr] %s", result.stderr[:500])
+        out_path = Path(out_png)
+        if out_path.exists() and out_path.stat().st_size > 1000:
+            data = out_path.read_bytes()
+            out_path.unlink(missing_ok=True)
+            logger.info("[municipio map] PNG gerado: %d bytes", len(data))
+            return data, clip
+        logger.warning("[municipio map] PNG não gerado ou vazio para %r/%r", species, municipality)
+        return None, clip
+    except Exception as exc:
+        logger.warning("[municipio map] Erro no subprocesso PyQGIS: %s", exc, exc_info=True)
+        return None, clip
+    finally:
+        Path(clip["clipped_path"]).unlink(missing_ok=True)
+        Path(clip["boundary_path"]).unlink(missing_ok=True)
+        if clip.get("suitable_path"):
+            Path(clip["suitable_path"]).unlink(missing_ok=True)
+
+
 def build_charts(summary: dict) -> list[bytes]:
     charts: list[bytes] = []
     for title, data in (
@@ -495,6 +614,30 @@ def _build_species_maps(configs: list) -> list[dict]:
     return maps
 
 
+def _build_municipio_maps(configs: list, municipality: str) -> list[dict]:
+    """Mapas dos rasters recortados aos limites do concelho (um por espécie)."""
+    maps = []
+    if not municipality:
+        return maps
+    for cfg in configs:
+        sp            = cfg["species"]
+        period        = cfg.get("period", "hist")
+        scenario      = cfg.get("scenario") if period != "hist" else None
+        colormap_name = cfg.get("colormap", "Greens5")
+        png, _ = build_municipio_map_image(sp, municipality, period, scenario, colormap_name=colormap_name)
+        if png:
+            maps.append({
+                "species": f"__municipio_{sp}__",
+                "period": period,
+                "scenario": scenario,
+                "map_png": png,
+                "title": f"Recorte ao concelho de {municipality} — {sp}",
+            })
+        else:
+            logger.warning("[PDF maps] Mapa de município devolveu None para %r/%r", sp, municipality)
+    return maps
+
+
 @app.post("/report-template")
 def get_report_template(level: str = "tecnico", species: str = None, municipality: str = None):
     try:
@@ -547,6 +690,7 @@ def export_report_pdf(
     payload = build_report_payload(normalized_level, species=species, municipality=municipality, species_configs=configs)
     filters = {"species": [species] if species else [], "municipality": municipality}
     species_maps = _build_species_maps(configs)
+    species_maps += _build_municipio_maps(configs, municipality)
     charts = build_charts(payload["summary"])
     pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps, charts=charts)
     filename = f"relatorio_{normalized_level}.pdf"
@@ -569,6 +713,7 @@ def export_report_pdf_post(
     payload = build_report_payload(normalized_level, species=species, municipality=municipality, species_configs=configs)
     filters = {"species": [c["species"] for c in configs], "municipality": municipality}
     species_maps = _build_species_maps(configs)
+    species_maps += _build_municipio_maps(configs, municipality)
     charts = build_charts(payload["summary"])
     pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps, charts=charts)
     filename = f"relatorio_{normalized_level}.pdf"
@@ -598,6 +743,51 @@ def get_combined_raster_map(body: ReportRequestBody):
 @app.get("/raster/species")
 def get_raster_species():
     return {"species": get_raster_species_list()}
+
+
+@app.get("/raster/municipios")
+def get_raster_municipios():
+    """Lista os concelhos disponíveis nos limites (para o seletor de município)."""
+    try:
+        return {"municipios": list_municipios()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erro ao carregar municípios: {exc}")
+
+
+@app.get("/raster/municipio-map/{species}")
+def get_municipio_map(
+    species: str,
+    municipio: str,
+    period: str = "hist",
+    scenario: str = None,
+    colormap: str = "Greens5",
+):
+    """Gera o mapa do raster da espécie recortado aos limites de um concelho."""
+    png, stats = build_municipio_map_image(
+        species, municipio, period=period, scenario=scenario, colormap_name=colormap
+    )
+    if not png:
+        raise HTTPException(
+            status_code=404,
+            detail=stats.get("error", "Não foi possível gerar o mapa do município."),
+        )
+    return Response(content=png, media_type="image/png")
+
+
+@app.get("/raster/municipio-area/{species}")
+def get_municipio_area(species: str, municipio: str, period: str = "hist", scenario: str = None):
+    """Área adequada da espécie dentro de um concelho (sem renderizar o mapa)."""
+    files = get_raster_files(species=species, period=period, scenario=scenario, binary=True)
+    if not files:
+        raise HTTPException(status_code=404, detail=f"Nenhum raster encontrado para {species}")
+    result = clip_raster_to_municipio(files[0], municipio)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    # remove caminhos de ficheiros temporários da resposta
+    Path(result.pop("clipped_path", "")).unlink(missing_ok=True)
+    Path(result.pop("boundary_path", "")).unlink(missing_ok=True)
+    Path(result.pop("suitable_path", "") or "").unlink(missing_ok=True)
+    return {"species": species, "period": period, "scenario": scenario, **result}
 
 
 @app.get("/raster/files")

@@ -16,9 +16,12 @@ sys.path.insert(0, os.path.join(QGIS_ROOT, "apps", "qgis-ltr", "python"))
 from qgis.core import (
     QgsApplication,
     QgsRasterLayer,
+    QgsVectorLayer,
     QgsMapSettings,
     QgsPalettedRasterRenderer,
-    QgsMapRendererCustomPainterJob,
+    QgsSingleSymbolRenderer,
+    QgsFillSymbol,
+    QgsMapRendererParallelJob,
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
     QgsProject,
@@ -43,17 +46,20 @@ def hex_to_qcolor(hex_color: str, alpha: int = 200) -> QColor:
 
 def build_map(tif_path: str, output_png: str, colormap_name: str,
               species: str, period: str, scenario: str | None,
-              label_suitable: str = "Adequado", label_unsuitable: str = "Não adequado") -> None:
+              label_suitable: str = "Adequado", label_unsuitable: str = "Não adequado",
+              boundary_path: str | None = None, suitable_path: str | None = None) -> None:
 
     QgsApplication.setPrefixPath(os.path.join(QGIS_ROOT, "apps", "qgis-ltr"), True)
     qgs = QgsApplication([], False)
     qgs.initQgis()
 
     # ── Basemap OSM via XYZ tiles ────────────────────────────────────────────
+    # zmax alto = tiles mais detalhados (estradas/nomes nítidos no recorte ao
+    # concelho), em vez do aspeto lavado de zmax baixo.
     osm_uri = (
         "type=xyz"
         "&url=https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-        "&zmax=12&zmin=0&crs=EPSG:3857"
+        "&zmax=18&zmin=0&crs=EPSG:3857"
     )
     basemap = QgsRasterLayer(osm_uri, "OSM", "wms")
     if not basemap.isValid():
@@ -82,11 +88,48 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
     if basemap.isValid():
         basemap.renderer().setOpacity(0.9)
 
+    # ── Camada vetorial da área adequada suavizada (opcional) ────────────────
+    # Substitui os blocos "pixelizados" do raster por um polígono suave.
+    suitable_layer = None
+    if suitable_path:
+        suitable_layer = QgsVectorLayer(suitable_path, "Área adequada", "ogr")
+        if suitable_layer.isValid():
+            fill_hex = stops[-1]
+            sym = QgsFillSymbol.createSimple({
+                "color": f"{suitable_color.red()},{suitable_color.green()},"
+                         f"{suitable_color.blue()},{LEGEND_ALPHA}",
+                "outline_color": fill_hex,
+                "outline_width": "0.3",
+            })
+            suitable_layer.setRenderer(QgsSingleSymbolRenderer(sym))
+        else:
+            print(f"[qgis_render] AVISO: área adequada inválida: {suitable_path}", file=sys.stderr)
+            suitable_layer = None
+
+    # ── Camada de contorno do município (opcional) ───────────────────────────
+    boundary_layer = None
+    if boundary_path:
+        boundary_layer = QgsVectorLayer(boundary_path, "Município", "ogr")
+        if boundary_layer.isValid():
+            sym = QgsFillSymbol.createSimple({
+                "color": "0,0,0,0",          # preenchimento transparente
+                "outline_color": "#b2182b",  # contorno vermelho-escuro
+                "outline_width": "0.9",
+            })
+            boundary_layer.setRenderer(QgsSingleSymbolRenderer(sym))
+        else:
+            print(f"[qgis_render] AVISO: contorno inválido: {boundary_path}", file=sys.stderr)
+            boundary_layer = None
+
     # ── Reprojectar extensão do raster para EPSG:3857 ───────────────────────
     crs_src = raster_layer.crs()
     crs_dst = QgsCoordinateReferenceSystem("EPSG:3857")
     transform = QgsCoordinateTransform(crs_src, crs_dst, QgsProject.instance())
     extent_3857 = transform.transformBoundingBox(raster_layer.extent())
+
+    # Pequena margem à volta (útil sobretudo no recorte por município)
+    if boundary_layer is not None:
+        extent_3857.scale(1.12)
 
     # ── Dimensões baseadas no aspeto real da extensão geográfica ────────────
     geo_w = extent_3857.width()
@@ -99,8 +142,16 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
         H = TARGET_LONG
         W = max(1, round(TARGET_LONG * geo_w / geo_h))
 
-    # Em QgsMapSettings, a primeira layer da lista é desenhada por CIMA
-    layers = [raster_layer]
+    # Em QgsMapSettings, a primeira layer da lista é desenhada por CIMA.
+    # Quando há polígono vetorizado da área adequada, usa-se esse em vez do
+    # raster blocoso; o raster ainda serve para definir a extensão do mapa.
+    layers = []
+    if boundary_layer is not None:
+        layers.append(boundary_layer)
+    if suitable_layer is not None:
+        layers.append(suitable_layer)
+    else:
+        layers.append(raster_layer)
     if basemap.isValid():
         layers.append(basemap)
 
@@ -112,13 +163,13 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
     settings.setBackgroundColor(QColor(240, 240, 240))
     settings.setOutputDpi(150)
 
-    map_img = QImage(QSize(W, H), QImage.Format.Format_ARGB32_Premultiplied)
-    map_img.fill(QColor(240, 240, 240))
-    painter = QPainter(map_img)
-    job = QgsMapRendererCustomPainterJob(settings, painter)
+    # QgsMapRendererParallelJob (em vez do CustomPainterJob) espera o download
+    # assíncrono das tiles OSM — essencial para os recortes pequenos (concelho),
+    # onde o painter job terminava antes das tiles chegarem (fundo cinzento).
+    job = QgsMapRendererParallelJob(settings)
     job.start()
     job.waitForFinished()
-    painter.end()
+    map_img = job.renderedImage()
 
     # ── Legenda num painel próprio à direita do mapa ─────────────────────────
     PANEL_W = max(160, W // 4)
@@ -185,6 +236,10 @@ if __name__ == "__main__":
             flags["label_suitable"] = arg.split("=", 1)[1]
         elif arg.startswith("--label-unsuitable="):
             flags["label_unsuitable"] = arg.split("=", 1)[1]
+        elif arg.startswith("--boundary="):
+            flags["boundary_path"] = arg.split("=", 1)[1]
+        elif arg.startswith("--suitable="):
+            flags["suitable_path"] = arg.split("=", 1)[1]
         else:
             positional.append(arg)
 

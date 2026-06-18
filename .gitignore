@@ -8,3 +8,7 @@ __pycache__/
 .venv
 **/.venv
 __pycache__/
+
+# Cache de limites de municípios (descarregado automaticamente em runtime)
+**/backend/data/municipios.geojson
+**/backend/data/municipios.geojson.part

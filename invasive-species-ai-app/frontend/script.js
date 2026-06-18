@@ -282,6 +282,7 @@ async function loadSpecies() {
         document.getElementById("rasterCardsContainer").insertAdjacentHTML('afterbegin', cardHtml);
         
         document.getElementById("speciesSelectLabel").textContent = `${Object.keys(activeSpeciesConfigs).length} espécie(s) no mapa`;
+        updateCombinedMapButtonState();
         filterPoints();
         fetchAndDrawRaster(species);
       }
@@ -299,9 +300,16 @@ async function loadSpecies() {
 
         const count = Object.keys(activeSpeciesConfigs).length;
         document.getElementById("speciesSelectLabel").textContent = count === 0 ? "Selecionar Espécies..." : `${count} espécie(s) no mapa`;
-        
+        updateCombinedMapButtonState();
+
         rasterLegend.update();
         filterPoints();
+      }
+
+      function updateCombinedMapButtonState() {
+        const btn = document.getElementById("combinedMapButton");
+        if (!btn) return;
+        btn.disabled = Object.keys(activeSpeciesConfigs).length < 2;
       }
 
       window.updateSpeciesConfig = function(species, key, value) {
@@ -670,9 +678,48 @@ async function exportPdf() {
   }
 }
 
+async function generateCombinedMap() {
+  const resultDiv = document.getElementById("combinedMapResult");
+  const btn = document.getElementById("combinedMapButton");
+
+  const speciesConfigs = Object.entries(activeSpeciesConfigs).map(([sp, cfg]) => ({
+    species: sp,
+    period: cfg.period,
+    scenario: cfg.scenario,
+    binary: cfg.binary ?? true,
+  }));
+
+  if (speciesConfigs.length < 2) {
+    alert("Seleciona pelo menos 2 espécies para gerar o mapa de sobreposição.");
+    return;
+  }
+
+  btn.disabled = true;
+  resultDiv.textContent = "A gerar mapa de sobreposição...";
+
+  try {
+    const resp = await fetch(`${API_URL}/raster/combined`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ species_configs: speciesConfigs }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    resultDiv.innerHTML = `<img src="${url}" alt="Mapa de zonas muito invasivas" style="max-width:100%;">`;
+  } catch (e) {
+    resultDiv.textContent = "Erro ao gerar mapa de sobreposição: " + e.message;
+  }
+  btn.disabled = false;
+}
+
 document.getElementById("templateButton").addEventListener("click", generateTemplateReport);
 document.getElementById("reportButton").addEventListener("click", generateAIReport);
 document.getElementById("pdfButton").addEventListener("click", exportPdf);
+document.getElementById("combinedMapButton").addEventListener("click", generateCombinedMap);
 
       // Inicia a aplicação
 // Inicia a aplicação

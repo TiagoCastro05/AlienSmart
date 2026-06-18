@@ -1,6 +1,7 @@
 import logging
 import io
 import textwrap
+import unicodedata
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -31,6 +32,7 @@ from raster_tools import (
     get_raster_bounds,
     get_raster_data_samples,
     get_raster_legend,
+    compute_combined_invasive_raster,
 )
 from raster_tiles import router as tiles_router
 from services.observation_service import get_observations
@@ -182,6 +184,7 @@ COLORMAP_STOPS: dict[str, list[str]] = {
     "YlOrRd":  ["#ffffcc", "#fed976", "#fd8d3c", "#e31a1c", "#800026"],
     "Blues":   ["#eff3ff", "#bdd7e7", "#6baed6", "#3182bd", "#08519c"],
     "RdPu":    ["#feebe2", "#fbb4b9", "#f768a1", "#ae017e", "#49006a"],
+    "BurntYellow": ["#fff7d4", "#ffe27a", "#e8b339", "#c9892a", "#9c5e0a"],
 }
 
 
@@ -197,21 +200,52 @@ class ReportRequestBody(BaseModel):
     species_configs: list[SpeciesConfigItem] = []
 
 
-def validate_report_text(report: str, summary: dict) -> dict:
+def _normalize_text(value: str) -> str:
+    """Minúsculas e sem acentos, para comparações tolerantes."""
+    nfkd = unicodedata.normalize("NFKD", value or "")
+    sem_acentos = "".join(ch for ch in nfkd if not unicodedata.combining(ch))
+    return sem_acentos.lower()
+
+
+def _mentions(norm_report: str, name: str) -> bool:
+    """Verifica se `name` é referido no relatório, tolerando acentos, maiúsculas
+    e o autor do nome científico (ex.: 'Acacia longifolia (Andrews) Willd.')."""
+    norm_name = _normalize_text(name).strip()
+    if not norm_name:
+        return False
+    if norm_name in norm_report:
+        return True
+    # match parcial por género + epíteto (as duas primeiras palavras)
+    parts = norm_name.split()
+    if len(parts) >= 2 and " ".join(parts[:2]) in norm_report:
+        return True
+    return False
+
+
+def validate_report_text(report: str, summary: dict, species_configs: list = None) -> dict:
     problems = []
+    norm_report = _normalize_text(report)
+
     total = str(summary.get("total_records", ""))
     if total and total not in report:
         problems.append("O número total de registos pode estar ausente ou incorreto.")
 
-    most_common_species = summary.get("most_common_species")
-    if most_common_species and most_common_species not in report:
-        problems.append("A espécie dominante não foi mencionada.")
+    # As espécies relevantes são as dos modelos SDM usadas no relatório;
+    # se não houver, recai sobre a espécie dominante dos registos de campo.
+    sdm_species = [c.get("species") for c in (species_configs or []) if c.get("species")]
+    expected_species = sdm_species or (
+        [summary["most_common_species"]] if summary.get("most_common_species") else []
+    )
+    missing_species = [s for s in expected_species if not _mentions(norm_report, s)]
+    if missing_species:
+        nomes = ", ".join(missing_species)
+        problems.append(f"Espécie(s) não mencionada(s) no relatório: {nomes}.")
 
     most_common_municipality = summary.get("most_common_municipality")
-    if most_common_municipality and most_common_municipality not in report:
+    if most_common_municipality and not _mentions(norm_report, most_common_municipality):
         problems.append("O município dominante não foi mencionado.")
 
-    if "limita" not in report.lower():
+    if "limita" not in norm_report:
         problems.append("O relatório pode não incluir limitações.")
 
     return {"valid": len(problems) == 0, "problems": problems}
@@ -268,7 +302,7 @@ def build_report_payload(
         report = f"{report}\nMotivo tecnico: {str(error)}".strip()
         source = "template_fallback"
 
-    validation = validate_report_text(report, summary)
+    validation = validate_report_text(report, summary, species_configs=species_configs or [])
     save_report(
         level=level,
         report_text=report,
@@ -352,6 +386,57 @@ def build_raster_map_image(
         return None
 
 
+def build_combined_map_image(species_configs: list, threshold: int = 2) -> bytes | None:
+    """
+    Soma os rasters binários das espécies selecionadas e renderiza as zonas onde
+    `threshold` ou mais espécies coexistem ("Muito invasivo").
+    """
+    if len(species_configs) < 2:
+        return None
+
+    combined = compute_combined_invasive_raster(species_configs, threshold=threshold)
+    if "error" in combined:
+        logger.warning("[combined map] %s", combined["error"])
+        return None
+
+    combined_tif = combined["path"]
+    import subprocess, tempfile
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        out_png = tmp.name
+
+    args = [
+        str(QGIS_PYTHON),
+        str(_QGIS_RENDER_SCRIPT),
+        combined_tif,
+        out_png,
+        "BurntYellow",
+        "Sobreposição",
+        "hist",
+        "--label-suitable=Muito invasivo",
+    ]
+
+    try:
+        result = subprocess.run(
+            args, env=QGIS_ENV, capture_output=True, text=True, timeout=120,
+            cwd=tempfile.gettempdir(),
+        )
+        if result.stderr:
+            logger.debug("[qgis_render stderr] %s", result.stderr[:500])
+        out_path = Path(out_png)
+        if out_path.exists() and out_path.stat().st_size > 1000:
+            data = out_path.read_bytes()
+            out_path.unlink(missing_ok=True)
+            logger.info("[combined map] PNG gerado via PyQGIS: %d bytes", len(data))
+            return data
+        logger.warning("[combined map] PNG não gerado ou vazio")
+        return None
+    except Exception as exc:
+        logger.warning("[combined map] Erro no subprocesso PyQGIS: %s", exc, exc_info=True)
+        return None
+    finally:
+        Path(combined_tif).unlink(missing_ok=True)
+
+
 def build_charts(summary: dict) -> list[bytes]:
     charts: list[bytes] = []
     for title, data in (
@@ -392,6 +477,20 @@ def _build_species_maps(configs: list) -> list[dict]:
             maps.append({"species": sp, "period": period, "scenario": scenario, "map_png": png})
         else:
             logger.warning("[PDF maps] Mapa devolveu None para %r / %r / %r", sp, period, scenario)
+
+    if len(configs) >= 2:
+        combined_png = build_combined_map_image(configs)
+        if combined_png:
+            maps.append({
+                "species": "__combined__",
+                "period": "hist",
+                "scenario": None,
+                "map_png": combined_png,
+                "title": "Mapa de Sobreposição — Zonas Muito Invasivas (2+ espécies)",
+            })
+        else:
+            logger.warning("[PDF maps] Mapa combinado devolveu None")
+
     logger.info("[PDF maps] Total mapas gerados: %d", len(maps))
     return maps
 
@@ -483,6 +582,18 @@ def export_report_pdf_post(
 # ---------------------------------------------------------------------------
 # Endpoints raster
 # ---------------------------------------------------------------------------
+
+@app.post("/raster/combined")
+def get_combined_raster_map(body: ReportRequestBody):
+    """Gera (on-demand) o mapa de sobreposição entre as espécies selecionadas."""
+    configs = [cfg.model_dump() for cfg in body.species_configs] if body.species_configs else []
+    if len(configs) < 2:
+        raise HTTPException(status_code=400, detail="Seleciona pelo menos 2 espécies para gerar o mapa combinado.")
+    png = build_combined_map_image(configs)
+    if not png:
+        raise HTTPException(status_code=500, detail="Não foi possível gerar o mapa combinado.")
+    return Response(content=png, media_type="image/png")
+
 
 @app.get("/raster/species")
 def get_raster_species():

@@ -6,6 +6,8 @@ Baseado no guião: SDM Raster Tools - Nomenclatura, Arquitectura de Tools e Apli
 
 import re
 import json
+import os
+import tempfile
 from pathlib import Path
 import rasterio
 import numpy as np
@@ -271,6 +273,57 @@ def compare_periods(species: str, scenario: str = "ssp370") -> dict:
 # ============================================================================
 # CAMADA 3 - SOBREPOSIÇÃO ESPACIAL
 # ============================================================================
+
+def compute_combined_invasive_raster(species_configs: list[dict], threshold: int = 2) -> dict:
+    """
+    Soma N rasters binários (0/1) de espécies diferentes, pixel a pixel, e gera
+    um novo raster binário com 1 nas zonas onde pelo menos `threshold` espécies
+    coexistem (zonas "muito invasivas").
+
+    Args:
+        species_configs: lista de {"species":, "period":, "scenario":}
+        threshold: nº mínimo de espécies sobrepostas para marcar o pixel (default=2)
+
+    Returns:
+        {"path": str, "n_species": int, "threshold": int} ou {"error": str}
+    """
+    if len(species_configs) < 2:
+        return {"error": "São necessárias pelo menos 2 espécies para gerar o raster combinado"}
+
+    arrays = []
+    profile = None
+    base_shape = None
+
+    for cfg in species_configs:
+        sp       = cfg["species"]
+        period   = cfg.get("period", "hist")
+        scenario = cfg.get("scenario") if period != "hist" else None
+
+        files = get_raster_files(species=sp, period=period, scenario=scenario, binary=True)
+        if not files:
+            return {"error": f"Raster não encontrado para {sp} / {period} / {scenario}"}
+
+        with rasterio.open(files[0]) as src:
+            data = src.read(1)
+            if profile is None:
+                profile = src.profile.copy()
+                base_shape = data.shape
+            elif data.shape != base_shape:
+                return {"error": f"Dimensões incompatíveis no raster de {sp}"}
+            arrays.append((data == 1).astype(np.uint8))
+
+    count = np.sum(arrays, axis=0)
+    combined = (count >= threshold).astype(np.uint8)
+
+    fd, out_path = tempfile.mkstemp(suffix="_combined_bin_eur.tif")
+    os.close(fd)
+
+    profile.update(dtype="uint8", count=1, nodata=255)
+    with rasterio.open(out_path, "w", **profile) as dst:
+        dst.write(combined, 1)
+
+    return {"path": out_path, "n_species": len(arrays), "threshold": threshold}
+
 
 def overlap_two_species(species1: str, species2: str, period: str = "hist", operation: str = "intersection") -> dict:
     """

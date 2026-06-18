@@ -206,8 +206,12 @@ def build_pdf(
 
     def _map_image_flowables(m: dict) -> list:
         """Gera os flowables do mapa (título + imagem) para uma entrada species_maps."""
-        period_label = "Histórico (1981–2024)" if m["period"] == "hist" else m["period"]
-        sc_label = f" · {m['scenario']}" if m.get("scenario") else ""
+        if m.get("title"):
+            title_text = m["title"]
+        else:
+            period_label = "Histórico (1981–2024)" if m["period"] == "hist" else m["period"]
+            sc_label = f" · {m['scenario']}" if m.get("scenario") else ""
+            title_text = f"Mapa de Distribuição — {period_label}{sc_label}"
         _r = _IR(io.BytesIO(m["map_png"]))
         _pw, _ph = _r.getSize()
         _max_w = 14 * cm
@@ -218,7 +222,7 @@ def build_pdf(
             _max_w = _max_h * (_pw / _ph)
         return [
             Spacer(1, 0.3 * cm),
-            Paragraph(f"Mapa de Distribuição — {period_label}{sc_label}", styles["h3"]),
+            Paragraph(title_text, styles["h3"]),
             Image(io.BytesIO(m["map_png"]), width=_max_w, height=_dh),
             Spacer(1, 0.5 * cm),
         ]

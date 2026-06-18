@@ -4,6 +4,7 @@ Chamado como subprocesso pelo FastAPI com o ambiente QGIS 3.44.11.
 
 Uso:
     python qgis_render.py <tif_path> <output_png> <colormap_name> <species> <period> [scenario]
+        [--label-suitable=TEXTO] [--label-unsuitable=TEXTO]
 """
 import sys
 import os
@@ -30,6 +31,7 @@ COLORMAP_STOPS = {
     "YlOrRd":  ["#ffffcc", "#fed976", "#fd8d3c", "#e31a1c", "#800026"],
     "Blues":   ["#eff3ff", "#bdd7e7", "#6baed6", "#3182bd", "#08519c"],
     "RdPu":    ["#feebe2", "#fbb4b9", "#f768a1", "#ae017e", "#49006a"],
+    "BurntYellow": ["#fff7d4", "#ffe27a", "#e8b339", "#c9892a", "#9c5e0a"],
 }
 
 
@@ -40,7 +42,8 @@ def hex_to_qcolor(hex_color: str, alpha: int = 200) -> QColor:
 
 
 def build_map(tif_path: str, output_png: str, colormap_name: str,
-              species: str, period: str, scenario: str | None) -> None:
+              species: str, period: str, scenario: str | None,
+              label_suitable: str = "Adequado", label_unsuitable: str = "Não adequado") -> None:
 
     QgsApplication.setPrefixPath(os.path.join(QGIS_ROOT, "apps", "qgis-ltr"), True)
     qgs = QgsApplication([], False)
@@ -69,8 +72,8 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
     suitable_color = hex_to_qcolor(stops[-1], alpha=LEGEND_ALPHA)
 
     classes = [
-        QgsPalettedRasterRenderer.Class(0, QColor(0, 0, 0, 0), "Não adequado"),
-        QgsPalettedRasterRenderer.Class(1, suitable_color,      "Adequado"),
+        QgsPalettedRasterRenderer.Class(0, QColor(0, 0, 0, 0), label_unsuitable),
+        QgsPalettedRasterRenderer.Class(1, suitable_color,      label_suitable),
     ]
     renderer = QgsPalettedRasterRenderer(raster_layer.dataProvider(), 1, classes)
     raster_layer.setRenderer(renderer)
@@ -153,8 +156,8 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
     fm = canvas.fontMetrics()
 
     entries = [
-        (suitable_color, "Adequado"),
-        (QColor(0, 0, 0, 0), "Não adequado"),
+        (suitable_color, label_suitable),
+        (QColor(0, 0, 0, 0), label_unsuitable),
     ]
     for color, label in entries:
         canvas.setBrush(QBrush(color) if color.alpha() > 0 else QBrush(Qt.NoBrush))
@@ -175,15 +178,26 @@ def build_map(tif_path: str, output_png: str, colormap_name: str,
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 6:
-        print("Uso: qgis_render.py <tif> <output_png> <colormap> <species> <period> [scenario]")
+    flags = {}
+    positional = []
+    for arg in sys.argv[1:]:
+        if arg.startswith("--label-suitable="):
+            flags["label_suitable"] = arg.split("=", 1)[1]
+        elif arg.startswith("--label-unsuitable="):
+            flags["label_unsuitable"] = arg.split("=", 1)[1]
+        else:
+            positional.append(arg)
+
+    if len(positional) < 5:
+        print("Uso: qgis_render.py <tif> <output_png> <colormap> <species> <period> [scenario] "
+              "[--label-suitable=TEXTO] [--label-unsuitable=TEXTO]")
         sys.exit(1)
 
-    tif     = sys.argv[1]
-    out_png = sys.argv[2]
-    cmap    = sys.argv[3]
-    sp      = sys.argv[4]
-    period  = sys.argv[5]
-    scenario = sys.argv[6] if len(sys.argv) > 6 else None
+    tif      = positional[0]
+    out_png  = positional[1]
+    cmap     = positional[2]
+    sp       = positional[3]
+    period   = positional[4]
+    scenario = positional[5] if len(positional) > 5 else None
 
-    build_map(tif, out_png, cmap, sp, period, scenario)
+    build_map(tif, out_png, cmap, sp, period, scenario, **flags)

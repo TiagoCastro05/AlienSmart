@@ -379,6 +379,31 @@ def _get_model() -> ChatOllama:
     return _model_instance
 
 
+def analyze_chart_with_ai(title: str, data_text: str) -> str:
+    """
+    Gera uma análise CURTA (PT-PT) de um gráfico, baseada apenas nos dados dados.
+    Devolve "" se o LLM falhar — o relatório nunca deve quebrar por causa disto.
+    """
+    if not data_text:
+        return ""
+    prompt = (
+        "És um analista técnico de espécies invasoras. Escreve uma análise MUITO CURTA "
+        "(2 a 3 frases, em português europeu) do gráfico descrito abaixo, baseada "
+        "EXCLUSIVAMENTE nos dados fornecidos. Não inventes números nem cites valores "
+        "que não estejam nos dados. Não repitas o título nem uses marcadores/listas. "
+        "Destaca a tendência ou o contraste mais relevante.\n\n"
+        f"Título do gráfico: {title}\n"
+        f"Dados: {data_text}\n"
+    )
+    try:
+        model = _get_model()
+        res = model.invoke([HumanMessage(content=prompt)])
+        return (res.content or "").strip()
+    except Exception as exc:
+        logger.warning("[analyze_chart_with_ai] falhou para %r: %s", title, exc)
+        return ""
+
+
 def generate_agent_report(
     level: str | None = None,
     species: str | None = None,
@@ -403,11 +428,19 @@ def generate_agent_report(
                 overlap = json.loads(get_raster_municipality_overlap_tool.invoke({
                     "species_name": sp, "municipality_name": municipality
                 }))
+                # Mesmo com município, fornecemos também os dados nacionais (área +
+                # tendência) para fundamentar a Discussão, e os valores EXATOS do
+                # concelho (histórico) que a secção determinística "Análise no
+                # Município" também usa — para o LLM não inventar números.
+                area  = json.loads(get_raster_suitable_area_tool.invoke({"species_name": sp, "period": period, "scenario": scenario}))
+                trend = json.loads(get_raster_trend_tool.invoke({"species_name": sp, "scenario": scenario}))
                 entry = {
                     "especie": sp,
                     "periodo": period,
                     "cenario": scenario if period != "hist" else "histórico",
-                    "area_adequada_municipio": overlap,
+                    "area_adequada_nacional_km2": area,
+                    "tendencia_futura": trend,
+                    "area_adequada_no_concelho": overlap,
                 }
             else:
                 area  = json.loads(get_raster_suitable_area_tool.invoke({"species_name": sp, "period": period, "scenario": scenario}))

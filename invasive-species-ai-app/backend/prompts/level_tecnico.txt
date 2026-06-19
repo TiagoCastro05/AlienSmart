@@ -22,23 +22,13 @@ Estrutura OBRIGATÓRIA (Usa exatamente estes títulos e formatos):
 
 **Resultados**
 
-### Área Adequada por Espécie
-Cria uma tabela com este formato exato:
-| Espécie | Área Adequada (km²) | Percentagem |
-| --- | --- | --- |
-| [Nome] | [Área] | [%] |
+[[TABELAS_SDM]]
 
-### Tendências Futuras por Cenário Climático
-Cria uma tabela com este formato exato:
-| Espécie | Área Adequada (km²) | Cenário / Período |
-| --- | --- | --- |
-| [Nome] | [Área] | [Cenário e anos] |
-
-### Comparação entre Espécies
-Cria uma tabela com este formato exato:
-| Espécie | Área Adequada (km²) | Tendência Futura |
-| --- | --- | --- |
-| [Nome] | [Área] | [Resumo da tendência] |
+IMPORTANTE: NÃO escrevas tabelas nem inventes números nesta secção de Resultados.
+Escreve apenas, sozinho numa linha, o marcador [[TABELAS_SDM]] — ele será
+substituído automaticamente pelas tabelas de área adequada (km²) calculadas
+diretamente a partir dos modelos SDM, já com análise crítica. Podes referir-te
+aos valores dessas tabelas na Discussão.
 
 **Discussão: Implicações, Áreas de Risco, Dinâmica de Colonização**
 [Texto da discussão]

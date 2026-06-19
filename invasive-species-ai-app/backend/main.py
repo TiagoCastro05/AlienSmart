@@ -1,5 +1,6 @@
 import logging
 import io
+import re
 import textwrap
 import unicodedata
 from collections import Counter
@@ -19,7 +20,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from agent_report import generate_agent_report, normalize_report_level
+from agent_report import generate_agent_report, normalize_report_level, analyze_chart_with_ai
 from raster_tools import (
     get_available_species as get_raster_species_list,
     get_raster_files,
@@ -36,6 +37,7 @@ from raster_tools import (
 )
 from raster_tiles import router as tiles_router
 from municipio_raster import clip_raster_to_municipio, list_municipios
+from report_tables import build_results_section
 from services.observation_service import get_observations
 from services.report_service import save_report
 
@@ -290,10 +292,11 @@ def build_municipio_area_section(species_configs: list, municipality: str) -> st
     if not municipality or not species_configs:
         return ""
 
+    # O recorte ao concelho usa SEMPRE o período histórico (adequação atual):
+    # mais intuitivo à escala local e evita mapas vazios/0% de projeções futuras.
     rows = []
     for cfg in species_configs:
-        period = cfg.get("period", "hist")
-        scenario = cfg.get("scenario") if period != "hist" else None
+        period, scenario = "hist", None
         files = get_raster_files(species=cfg["species"], period=period, scenario=scenario, binary=True)
         if not files:
             continue
@@ -301,9 +304,10 @@ def build_municipio_area_section(species_configs: list, municipality: str) -> st
         if "error" in res:
             logger.warning("[municipio section] %s", res["error"])
             continue
-        Path(res.pop("clipped_path", "")).unlink(missing_ok=True)
-        Path(res.pop("boundary_path", "")).unlink(missing_ok=True)
-        Path(res.pop("suitable_path", "") or "").unlink(missing_ok=True)
+        for _k in ("clipped_path", "boundary_path", "suitable_path"):
+            _p = res.pop(_k, None)
+            if _p:
+                Path(_p).unlink(missing_ok=True)
         rows.append((cfg["species"], res["suitable_area_km2"], res["suitable_pct"]))
 
     if not rows:
@@ -312,16 +316,148 @@ def build_municipio_area_section(species_configs: list, municipality: str) -> st
     linhas = [
         f"## Análise no Município de {municipality}",
         "",
-        f"A tabela seguinte apresenta a área classificada como adequada para cada "
-        f"espécie **dentro dos limites do concelho de {municipality}**, obtida por "
-        f"recorte (clip) dos modelos SDM ao polígono administrativo do município. "
-        f"As percentagens referem-se à fração da área válida do concelho.",
+        f"Esta secção foca os modelos SDM **dentro dos limites administrativos do "
+        f"concelho de {municipality}**, obtidos por recorte (clip) dos rasters ao "
+        f"polígono do município. A tabela-resumo apresenta a área adequada por "
+        f"espécie; as percentagens referem-se à fração da área válida do concelho.",
         "",
         "| Espécie | Área adequada no concelho (km²) | % da área do concelho |",
         "| --- | --- | --- |",
     ]
     for sp, km2, pct in rows:
         linhas.append(f"| {sp} | {km2} | {pct}% |")
+
+    # Bloco por espécie: cabeçalho + marcador do mapa do recorte + análise.
+    # O marcador [[MAPA:__municipio_{sp}__]] é substituído no pdf_builder pelo
+    # PNG do recorte ao concelho, garantindo que a imagem do município aparece
+    # mesmo aqui (e não misturada na secção de Resultados).
+    for sp, km2, pct in rows:
+        linhas += [
+            "",
+            f"### {sp} — recorte ao concelho de {municipality}",
+            "",
+            f"[[MAPA:__municipio_{sp}__]]",
+            "",
+            _municipio_species_analysis(sp, municipality, km2, pct),
+        ]
+
+    return "\n".join(linhas)
+
+
+def _municipio_species_analysis(species: str, municipality: str, km2: float, pct: float) -> str:
+    """Texto crítico curto sobre a adequação de uma espécie dentro do concelho."""
+    if pct >= 66:
+        nivel = (
+            f"uma fração **muito elevada** do território, indicando que o concelho "
+            f"oferece condições climáticas largamente favoráveis ao estabelecimento da espécie"
+        )
+    elif pct >= 33:
+        nivel = (
+            f"uma fração **moderada** do território, com áreas favoráveis e áreas "
+            f"marginais distribuídas pelo concelho"
+        )
+    elif pct > 0:
+        nivel = (
+            f"uma fração **reduzida** do território, sugerindo adequação localizada "
+            f"a condições específicas dentro do concelho"
+        )
+    else:
+        nivel = (
+            f"praticamente nenhuma área adequada, indicando condições climáticas "
+            f"globalmente desfavoráveis à espécie neste concelho"
+        )
+    return (
+        f"No concelho de {municipality}, *{species}* apresenta **{km2} km²** de área "
+        f"climaticamente adequada, o que corresponde a **{pct}%** da área válida do "
+        f"concelho — {nivel}. O mapa acima destaca a localização dessas áreas sobre "
+        f"a cartografia base, apoiando a definição de prioridades de monitorização e "
+        f"controlo à escala local."
+    )
+
+
+def _fmt_km2(value) -> str:
+    if value is None:
+        return "—"
+    return f"{int(round(value)):,}".replace(",", " ")
+
+
+def build_overlap_section(species_configs: list, municipality: str | None) -> str:
+    """
+    Secção dedicada às ZONAS DE SOBREPOSIÇÃO (≥2 espécies coexistem) — o mapa
+    combinado nacional e, se houver concelho selecionado, o recorte ao concelho.
+    Só faz sentido com 2+ espécies. Devolve "" caso contrário.
+    """
+    species_list = [c["species"] for c in (species_configs or []) if c.get("species")]
+    if len(species_list) < 2:
+        return ""
+
+    from raster_tools import compute_suitable_area
+
+    # Área de sobreposição a nível nacional (períodos/cenários escolhidos)
+    nat_area = None
+    try:
+        comb = compute_combined_invasive_raster(species_configs, threshold=2)
+        if "path" in comb:
+            nat_area = compute_suitable_area(comb["path"]).get("suitable_area_km2")
+            Path(comb["path"]).unlink(missing_ok=True)
+    except Exception as exc:
+        logger.warning("[overlap section] área nacional falhou: %s", exc)
+
+    # Área de sobreposição dentro do concelho (histórico)
+    conc_area = conc_pct = None
+    if municipality:
+        try:
+            hist_cfgs = [{"species": s, "period": "hist", "scenario": None} for s in species_list]
+            comb = compute_combined_invasive_raster(hist_cfgs, threshold=2)
+            if "path" in comb:
+                clip = clip_raster_to_municipio(comb["path"], municipality)
+                Path(comb["path"]).unlink(missing_ok=True)
+                if "error" not in clip:
+                    conc_area = clip.get("suitable_area_km2")
+                    conc_pct = clip.get("suitable_pct")
+                    for _k in ("clipped_path", "boundary_path", "suitable_path"):
+                        _p = clip.get(_k)
+                        if _p:
+                            Path(_p).unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning("[overlap section] área concelho falhou: %s", exc)
+
+    linhas = [
+        "**Zonas de Maior Sobreposição (Espécies Múltiplas)**",
+        "",
+        f"Esta secção identifica as zonas onde **duas ou mais** das espécies analisadas "
+        f"({', '.join(species_list)}) coexistem climaticamente — ou seja, as áreas de "
+        f"**maior pressão invasora combinada**, prioritárias para vigilância e controlo. "
+        + ("O primeiro mapa mostra a sobreposição à escala nacional; o segundo, o recorte "
+           "ao concelho." if municipality else "O mapa mostra a sobreposição à escala nacional."),
+        "",
+        "[[MAPA:__combined__]]",
+    ]
+    if municipality:
+        linhas += ["", "[[MAPA:__municipio_combined__]]"]
+
+    partes = ["**Análise crítica:** "]
+    if nat_area is not None:
+        partes.append(
+            f"A nível nacional, a área onde pelo menos duas espécies coexistem é de "
+            f"**{_fmt_km2(nat_area)} km²**. "
+        )
+    if municipality and conc_area is not None:
+        if conc_area > 0:
+            partes.append(
+                f"No concelho de {municipality}, essa sobreposição cobre **{conc_area} km²** "
+                f"(**{conc_pct}%** da área do concelho). "
+            )
+        else:
+            partes.append(
+                f"No concelho de {municipality}, não há atualmente coexistência das espécies "
+                f"(0 km² de sobreposição). "
+            )
+    partes.append(
+        "Estas zonas devem ser priorizadas nas ações de gestão, por concentrarem o risco "
+        "de múltiplas espécies invasoras em simultâneo."
+    )
+    linhas += ["", "".join(partes).strip()]
     return "\n".join(linhas)
 
 
@@ -347,11 +483,33 @@ def build_report_payload(
         report = f"{report}\nMotivo tecnico: {str(error)}".strip()
         source = "template_fallback"
 
-    # Acrescenta a análise por município (texto + tabela) antes de validar,
-    # garantindo que o município passa a ser mencionado no relatório.
+    # Substitui o marcador [[TABELAS_SDM]] pelas tabelas de área adequada
+    # calculadas em Python (valores exatos). Se o LLM não tiver escrito o
+    # marcador, acrescenta as tabelas no fim. Sem dados → remove o marcador.
+    results_section = build_results_section(species_configs or [])
+    if "[[TABELAS_SDM]]" in report:
+        report = report.replace("[[TABELAS_SDM]]", results_section or "")
+    elif results_section:
+        report = f"{report}\n\n{results_section}"
+
+    # Acrescenta a análise por município (texto + tabela + mapas do recorte).
+    # Posição: LOGO APÓS os Resultados, antes da Discussão — para manter o fluxo
+    # nacional → concelho → discussão. Se não houver Discussão, vai para o fim.
+    extra_blocks = []
     municipio_section = build_municipio_area_section(species_configs or [], municipality)
     if municipio_section:
-        report = f"{report}\n\n{municipio_section}"
+        extra_blocks.append(municipio_section)
+    # Secção dedicada às zonas de sobreposição (mapa combinado nacional + concelho).
+    overlap_section = build_overlap_section(species_configs or [], municipality)
+    if overlap_section:
+        extra_blocks.append(overlap_section)
+    if extra_blocks:
+        block = "\n\n".join(extra_blocks)
+        m = re.search(r'(?im)^\s*(?:#+\s*)?\*{0,2}\s*Discuss[aã]o', report)
+        if m:
+            report = report[:m.start()] + block + "\n\n" + report[m.start():]
+        else:
+            report = f"{report}\n\n{block}"
 
     validation = validate_report_text(report, summary, species_configs=species_configs or [])
     save_report(
@@ -488,6 +646,67 @@ def build_combined_map_image(species_configs: list, threshold: int = 2) -> bytes
         Path(combined_tif).unlink(missing_ok=True)
 
 
+def build_combined_municipio_map_image(species_configs: list, municipality: str,
+                                       threshold: int = 2) -> bytes | None:
+    """
+    Soma os rasters das espécies (sobreposição "muito invasiva") e RECORTA ao
+    concelho — versão local do mapa combinado nacional. Usa período histórico,
+    coerente com os restantes recortes ao concelho.
+    """
+    if len(species_configs) < 2 or not municipality:
+        return None
+
+    hist_cfgs = [{"species": c["species"], "period": "hist", "scenario": None}
+                 for c in species_configs]
+    combined = compute_combined_invasive_raster(hist_cfgs, threshold=threshold)
+    if "error" in combined:
+        logger.warning("[combined municipio map] %s", combined["error"])
+        return None
+
+    clip = clip_raster_to_municipio(combined["path"], municipality)
+    Path(combined["path"]).unlink(missing_ok=True)
+    if "error" in clip:
+        logger.warning("[combined municipio map] %s", clip["error"])
+        return None
+
+    import subprocess, tempfile
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        out_png = tmp.name
+
+    args = [
+        str(QGIS_PYTHON), str(_QGIS_RENDER_SCRIPT),
+        clip["clipped_path"], out_png, "BurntYellow", "Sobreposição", "hist",
+        "--label-suitable=Muito invasivo",
+        f"--boundary={clip['boundary_path']}",
+    ]
+    if clip.get("suitable_path"):
+        args.append(f"--suitable={clip['suitable_path']}")
+
+    try:
+        result = subprocess.run(
+            args, env=QGIS_ENV, capture_output=True, text=True, timeout=120,
+            cwd=tempfile.gettempdir(),
+        )
+        if result.stderr:
+            logger.debug("[qgis_render stderr] %s", result.stderr[:500])
+        out_path = Path(out_png)
+        if out_path.exists() and out_path.stat().st_size > 1000:
+            data = out_path.read_bytes()
+            out_path.unlink(missing_ok=True)
+            logger.info("[combined municipio map] PNG gerado: %d bytes", len(data))
+            return data
+        logger.warning("[combined municipio map] PNG não gerado ou vazio")
+        return None
+    except Exception as exc:
+        logger.warning("[combined municipio map] Erro no subprocesso PyQGIS: %s", exc, exc_info=True)
+        return None
+    finally:
+        for _k in ("clipped_path", "boundary_path", "suitable_path"):
+            _p = clip.get(_k)
+            if _p:
+                Path(_p).unlink(missing_ok=True)
+
+
 def build_municipio_map_image(
     species: str,
     municipality: str,
@@ -556,11 +775,12 @@ def build_municipio_map_image(
             Path(clip["suitable_path"]).unlink(missing_ok=True)
 
 
-def build_charts(summary: dict) -> list[bytes]:
-    charts: list[bytes] = []
+def build_charts(summary: dict) -> list[dict]:
+    """Gráficos de barras dos registos de campo. Devolve [{'caption','png'}]."""
+    charts: list[dict] = []
     for title, data in (
-        ("Registos por especie", summary.get("species_count", {})),
-        ("Registos por municipio", summary.get("municipality_count", {})),
+        ("Registos de campo por espécie", summary.get("species_count", {})),
+        ("Registos de campo por município", summary.get("municipality_count", {})),
     ):
         if not data:
             continue
@@ -577,7 +797,65 @@ def build_charts(summary: dict) -> list[bytes]:
         fig.savefig(buf, format="png", dpi=150)
         plt.close(fig)
         buf.seek(0)
-        charts.append(buf.read())
+        data_text = "; ".join(f"{l}: {v} registos" for l, v in items)
+        analysis = analyze_chart_with_ai(title, data_text)
+        charts.append({"caption": title, "png": buf.read(), "analysis": analysis})
+    return charts
+
+
+def build_sdm_evolution_charts(species_configs: list) -> list[dict]:
+    """
+    Gráfico de linhas da área adequada (km²) por período e cenário, a partir dos
+    rasters SDM — um gráfico por espécie. Devolve [{'caption','png'}].
+    """
+    from report_tables import _area, SCENARIOS, FUTURE_PERIODS, SCENARIO_SHORT
+
+    species_list = [c["species"] for c in (species_configs or []) if c.get("species")]
+    x_labels = ["Histórico", "2041-2070", "2071-2100"]
+    colors_sc = {"ssp126": "#1a9850", "ssp370": "#fdae61", "ssp585": "#d73027"}
+    charts: list[dict] = []
+
+    for sp in species_list:
+        hist = _area(sp, "hist", None)
+        fig, ax = plt.subplots(figsize=(6.5, 3.5))
+        has_data = False
+        for sc in SCENARIOS:
+            ys = [
+                hist if hist is not None else float("nan"),
+                _area(sp, "2041-2070", sc),
+                _area(sp, "2071-2100", sc),
+            ]
+            ys = [float("nan") if v is None else v for v in ys]
+            if any(v == v for v in ys):  # algum valor não-NaN
+                has_data = True
+            ax.plot(x_labels, ys, marker="o", linewidth=2,
+                    color=colors_sc.get(sc, "#555"), label=SCENARIO_SHORT[sc])
+        if not has_data:
+            plt.close(fig)
+            continue
+        ax.set_title(f"Evolução da área adequada (SDM) — {sp}")
+        ax.set_ylabel("Área adequada (km²)")
+        ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+        ax.legend(title="Cenário", fontsize=8)
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=150)
+        plt.close(fig)
+        buf.seek(0)
+        caption = f"Evolução da área adequada (SDM) — {sp}"
+        partes = []
+        if hist is not None:
+            partes.append(f"Histórico: {int(round(hist))} km²")
+        for sc in SCENARIOS:
+            a41 = _area(sp, "2041-2070", sc)
+            a71 = _area(sp, "2071-2100", sc)
+            partes.append(
+                f"{SCENARIO_SHORT[sc]} — 2041-2070: "
+                f"{int(round(a41)) if a41 is not None else 's/ dados'} km², "
+                f"2071-2100: {int(round(a71)) if a71 is not None else 's/ dados'} km²"
+            )
+        analysis = analyze_chart_with_ai(caption, "; ".join(partes))
+        charts.append({"caption": caption, "png": buf.read(), "analysis": analysis})
     return charts
 
 
@@ -593,7 +871,7 @@ def _build_species_maps(configs: list) -> list[dict]:
         png = build_raster_map_image(sp, period, scenario, colormap_name=colormap_name)
         if png:
             logger.info("[PDF maps] Mapa gerado: %d bytes", len(png))
-            maps.append({"species": sp, "period": period, "scenario": scenario, "map_png": png})
+            maps.append({"species": sp, "match_species": sp, "period": period, "scenario": scenario, "map_png": png})
         else:
             logger.warning("[PDF maps] Mapa devolveu None para %r / %r / %r", sp, period, scenario)
 
@@ -621,13 +899,17 @@ def _build_municipio_maps(configs: list, municipality: str) -> list[dict]:
         return maps
     for cfg in configs:
         sp            = cfg["species"]
-        period        = cfg.get("period", "hist")
-        scenario      = cfg.get("scenario") if period != "hist" else None
+        # Recorte ao concelho sempre histórico (coerente com build_municipio_area_section)
+        period, scenario = "hist", None
         colormap_name = cfg.get("colormap", "Greens5")
         png, _ = build_municipio_map_image(sp, municipality, period, scenario, colormap_name=colormap_name)
         if png:
+            # match_species único (igual ao species) para o mapa do recorte ser
+            # inserido SÓ pelo marcador da secção do município, e não pelo
+            # marcador [[MAPA:{especie}]] da secção de Resultados.
             maps.append({
                 "species": f"__municipio_{sp}__",
+                "match_species": f"__municipio_{sp}__",
                 "period": period,
                 "scenario": scenario,
                 "map_png": png,
@@ -635,6 +917,21 @@ def _build_municipio_maps(configs: list, municipality: str) -> list[dict]:
             })
         else:
             logger.warning("[PDF maps] Mapa de município devolveu None para %r/%r", sp, municipality)
+
+    # Mapa de sobreposição (≥2 espécies) recortado ao concelho — gémeo do nacional
+    if len(configs) >= 2:
+        combined_png = build_combined_municipio_map_image(configs, municipality)
+        if combined_png:
+            maps.append({
+                "species": "__municipio_combined__",
+                "match_species": "__municipio_combined__",
+                "period": "hist",
+                "scenario": None,
+                "map_png": combined_png,
+                "title": f"Sobreposição (≥2 espécies) no concelho de {municipality}",
+            })
+        else:
+            logger.warning("[PDF maps] Mapa combinado de município devolveu None para %r", municipality)
     return maps
 
 
@@ -691,7 +988,7 @@ def export_report_pdf(
     filters = {"species": [species] if species else [], "municipality": municipality}
     species_maps = _build_species_maps(configs)
     species_maps += _build_municipio_maps(configs, municipality)
-    charts = build_charts(payload["summary"])
+    charts = build_charts(payload["summary"]) + build_sdm_evolution_charts(configs)
     pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps, charts=charts)
     filename = f"relatorio_{normalized_level}.pdf"
     return Response(
@@ -714,7 +1011,7 @@ def export_report_pdf_post(
     filters = {"species": [c["species"] for c in configs], "municipality": municipality}
     species_maps = _build_species_maps(configs)
     species_maps += _build_municipio_maps(configs, municipality)
-    charts = build_charts(payload["summary"])
+    charts = build_charts(payload["summary"]) + build_sdm_evolution_charts(configs)
     pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps, charts=charts)
     filename = f"relatorio_{normalized_level}.pdf"
     return Response(
@@ -784,9 +1081,10 @@ def get_municipio_area(species: str, municipio: str, period: str = "hist", scena
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     # remove caminhos de ficheiros temporários da resposta
-    Path(result.pop("clipped_path", "")).unlink(missing_ok=True)
-    Path(result.pop("boundary_path", "")).unlink(missing_ok=True)
-    Path(result.pop("suitable_path", "") or "").unlink(missing_ok=True)
+    for _k in ("clipped_path", "boundary_path", "suitable_path"):
+        _p = result.pop(_k, None)
+        if _p:
+            Path(_p).unlink(missing_ok=True)
     return {"species": species, "period": period, "scenario": scenario, **result}
 
 

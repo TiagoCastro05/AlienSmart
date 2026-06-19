@@ -16,12 +16,15 @@ from reportlab.lib.units import cm
 from reportlab.platypus import (
     HRFlowable,
     Image,
+    KeepTogether,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
 )
+from reportlab.platypus.tableofcontents import TableOfContents
 
 # ── Paleta ───────────────────────────────────────────────────────────────────
 GREEN_DARK   = colors.HexColor("#1b4332")
@@ -40,15 +43,15 @@ def _make_styles() -> dict:
     s = {}
     s["h1"] = ParagraphStyle("h1",
         fontSize=17, textColor=GREEN_DARK, spaceAfter=4, spaceBefore=14,
-        fontName="Helvetica-Bold", leading=21,
+        fontName="Helvetica-Bold", leading=21, keepWithNext=1,
     )
     s["h2"] = ParagraphStyle("h2",
         fontSize=13, textColor=GREEN_MID, spaceAfter=4, spaceBefore=10,
-        fontName="Helvetica-Bold", leading=16,
+        fontName="Helvetica-Bold", leading=16, keepWithNext=1,
     )
     s["h3"] = ParagraphStyle("h3",
         fontSize=11, textColor=GREEN_HEADER, spaceAfter=3, spaceBefore=7,
-        fontName="Helvetica-Bold", leading=14,
+        fontName="Helvetica-Bold", leading=14, keepWithNext=1,
     )
     s["body"] = ParagraphStyle("body",
         fontSize=10, textColor=TEXT_DARK, spaceAfter=4, spaceBefore=2,
@@ -61,6 +64,28 @@ def _make_styles() -> dict:
     s["meta"] = ParagraphStyle("meta",
         fontSize=9, textColor=TEXT_GREY, spaceAfter=8, spaceBefore=0,
         fontName="Helvetica", leading=12,
+    )
+    # ── Capa ──
+    s["cover_kicker"] = ParagraphStyle("cover_kicker",
+        fontSize=12, textColor=GREEN_MID, spaceAfter=10, spaceBefore=0,
+        fontName="Helvetica-Bold", leading=16, alignment=TA_CENTER,
+    )
+    s["cover_title"] = ParagraphStyle("cover_title",
+        fontSize=26, textColor=GREEN_DARK, spaceAfter=12, spaceBefore=0,
+        fontName="Helvetica-Bold", leading=31, alignment=TA_CENTER,
+    )
+    s["cover_meta"] = ParagraphStyle("cover_meta",
+        fontSize=11, textColor=TEXT_DARK, spaceAfter=5, spaceBefore=0,
+        fontName="Helvetica", leading=16, alignment=TA_CENTER,
+    )
+    # ── Índice ──
+    s["toc0"] = ParagraphStyle("toc0",
+        fontName="Helvetica-Bold", fontSize=11, textColor=GREEN_DARK,
+        leftIndent=4, firstLineIndent=-4, spaceBefore=5, leading=16,
+    )
+    s["toc1"] = ParagraphStyle("toc1",
+        fontName="Helvetica", fontSize=10, textColor=TEXT_DARK,
+        leftIndent=18, firstLineIndent=-4, spaceBefore=2, leading=14,
     )
     s["th"] = ParagraphStyle("th",
         fontSize=9, fontName="Helvetica-Bold",
@@ -158,6 +183,27 @@ def _on_page(canvas, doc, level: str, date_str: str) -> None:
     canvas.restoreState()
 
 
+class _DocWithTOC(SimpleDocTemplate):
+    """SimpleDocTemplate que alimenta o Índice (TableOfContents) com os títulos.
+
+    Os cabeçalhos h1 (secções principais) e h2 (ex.: Análise no Município,
+    Análise Estatística) são registados como entradas do índice, com o número
+    de página real (resolvido em multiBuild).
+    """
+
+    def afterFlowable(self, flowable):
+        if not isinstance(flowable, Paragraph):
+            return
+        text = flowable.getPlainText().strip()
+        if not text or text.lower() == "índice":
+            return
+        # Secções principais (h1) e secções de topo marcadas como h2
+        # (Análise no Município, Análise Estatística) entram ao mesmo nível.
+        name = flowable.style.name
+        if name in ("h1", "h2"):
+            self.notify("TOCEntry", (0, text, self.page))
+
+
 # ── Função principal ─────────────────────────────────────────────────────────
 def build_pdf(
     report_text: str,
@@ -165,7 +211,7 @@ def build_pdf(
     summary: dict | None = None,
     filters: dict | None = None,
     species_maps: list[dict] | None = None,
-    charts: list[bytes] | None = None,
+    charts: list | None = None,
 ) -> bytes:
     """
     Gera PDF profissional a partir do markdown gerado pelo Ollama.
@@ -179,27 +225,52 @@ def build_pdf(
     date_str = datetime.now().strftime("%d/%m/%Y %H:%M")
     styles = _make_styles()
 
+    # ── Extrair o título do relatório (linha "**Título:** ...") para a capa,
+    # removendo-a do corpo para não aparecer duplicada.
+    report_title = None
+    mt = re.search(r'(?im)^\s*\*\*\s*T[íi]tulo\s*:?\s*\*\*\s*[:\-—]?\s*(.+)$', report_text)
+    if mt:
+        report_title = mt.group(1).strip()
+        report_text = report_text[:mt.start()] + report_text[mt.end():]
+    if not report_title:
+        report_title = f"Relatório {level.capitalize()} — Espécies Invasoras"
+
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(
+    doc = _DocWithTOC(
         buf, pagesize=A4,
         leftMargin=1.8 * cm, rightMargin=1.8 * cm,
         topMargin=2.0 * cm, bottomMargin=1.6 * cm,
+        title=report_title,
     )
 
     story: list = []
 
-    # Linha de filtros
+    # ── CAPA ─────────────────────────────────────────────────────────────────
+    story.append(Spacer(1, 5.0 * cm))
+    story.append(Paragraph(f"RELATÓRIO {level.upper()}", styles["cover_kicker"]))
+    story.append(Paragraph(_fmt(report_title), styles["cover_title"]))
+    story.append(HRFlowable(width="55%", thickness=1.4, color=GREEN_HEADER,
+                            spaceBefore=6, spaceAfter=18, hAlign="CENTER"))
     if filters:
-        parts = []
         if filters.get("species"):
             names = ", ".join(f"<i>{s}</i>" for s in filters["species"])
-            parts.append(f"Espécies: {names}")
+            story.append(Paragraph(f"Espécies: {names}", styles["cover_meta"]))
         if filters.get("municipality"):
-            parts.append(f"Município: <b>{filters['municipality']}</b>")
-        if parts:
-            story.append(Paragraph(" &nbsp;|&nbsp; ".join(parts), styles["meta"]))
-            story.append(HRFlowable(width="100%", thickness=0.8,
-                                    color=GREEN_LIGHT, spaceAfter=6))
+            story.append(Paragraph(f"Município: <b>{filters['municipality']}</b>",
+                                   styles["cover_meta"]))
+    story.append(Spacer(1, 0.6 * cm))
+    story.append(Paragraph(f"Gerado em {date_str}", styles["cover_meta"]))
+    story.append(Paragraph("AlienSmart — Plataforma de Espécies Invasoras",
+                           styles["cover_meta"]))
+    story.append(PageBreak())
+
+    # ── ÍNDICE ───────────────────────────────────────────────────────────────
+    story.append(Paragraph("Índice", styles["h1"]))
+    story.append(HRFlowable(width="100%", thickness=1.2, color=GREEN_MID, spaceAfter=8))
+    toc = TableOfContents()
+    toc.levelStyles = [styles["toc0"], styles["toc1"]]
+    story.append(toc)
+    story.append(PageBreak())
 
     # Índice: espécie (lowercase) → dict com png e flag "já inserido"
     from reportlab.lib.utils import ImageReader as _IR
@@ -220,23 +291,45 @@ def build_pdf(
         if _dh > _max_h:
             _dh = _max_h
             _max_w = _max_h * (_pw / _ph)
+        # KeepTogether garante que o título do mapa e a imagem nunca se separam
+        # entre páginas.
         return [
             Spacer(1, 0.3 * cm),
-            Paragraph(title_text, styles["h3"]),
-            Image(io.BytesIO(m["map_png"]), width=_max_w, height=_dh),
+            KeepTogether([
+                Paragraph(title_text, styles["h3"]),
+                Image(io.BytesIO(m["map_png"]), width=_max_w, height=_dh),
+            ]),
             Spacer(1, 0.5 * cm),
         ]
 
+    # Chave única por mapa; "match" = espécie a que o mapa pertence (para casar
+    # com o marcador [[MAPA:espécie]] e com a heurística por título).
     map_lookup: dict[str, dict] = {}
     if species_maps:
         for m in species_maps:
-            map_lookup[m["species"].lower()] = {"data": m, "inserted": False}
+            match = (m.get("match_species") or m["species"]).lower()
+            map_lookup[m["species"].lower()] = {"data": m, "inserted": False, "match": match}
+
+    # Quando o relatório usa marcadores [[MAPA:…]], desligamos a heurística por
+    # título (os mapas são colocados no sítio exato do marcador).
+    has_map_markers = "[[MAPA:" in report_text
+
+    def _insert_maps_for(species_name: str) -> None:
+        """Insere todos os mapas (distribuição + recorte) de uma espécie."""
+        alvo = species_name.strip().lower()
+        for entry in map_lookup.values():
+            if not entry["inserted"] and entry["match"] == alvo:
+                for fl in _map_image_flowables(entry["data"]):
+                    story.append(fl)
+                entry["inserted"] = True
 
     def _try_insert_map(heading_text: str) -> None:
-        """Se o heading contiver o nome de uma espécie com mapa, insere o mapa agora."""
+        """Heurística (sem marcadores): insere o mapa cujo nome esteja no título."""
+        if has_map_markers:
+            return
         h_lower = heading_text.lower()
-        for sp_key, entry in map_lookup.items():
-            if not entry["inserted"] and sp_key in h_lower:
+        for entry in map_lookup.values():
+            if not entry["inserted"] and entry["match"] in h_lower:
                 for fl in _map_image_flowables(entry["data"]):
                     story.append(fl)
                 entry["inserted"] = True
@@ -253,6 +346,25 @@ def build_pdf(
 
         if not stripped:
             story.append(Spacer(1, 3))
+            i += 1
+            continue
+
+        # Marcador de mapa: [[MAPA:Nome da espécie]] → insere aqui o(s) mapa(s)
+        marker = re.match(r'^\[\[MAPA:(.+?)\]\]$', stripped)
+        if marker:
+            _insert_maps_for(marker.group(1))
+            i += 1
+            continue
+
+        # Linha "**Título:** Texto" → título principal (h1) só com o texto,
+        # sem o rótulo "Título:".
+        mt = re.match(r'^\*\*\s*T[íi]tulo\s*:?\s*\*\*\s*[:\-—]?\s*(.+)$', stripped)
+        if mt:
+            titulo = mt.group(1).strip()
+            story.append(Paragraph(_fmt(titulo), styles["h1"]))
+            story.append(HRFlowable(width="100%", thickness=1.2,
+                                    color=GREEN_MID, spaceAfter=4))
+            _try_insert_map(titulo)
             i += 1
             continue
 
@@ -292,15 +404,17 @@ def build_pdf(
             i += 1
             continue
 
-        # Tabela markdown — insere mapa pendente ANTES da tabela
+        # Tabela markdown
         if stripped.startswith("|"):
-            # Verificar se há mapa ainda não inserido para a secção actual
-            for sp_key, entry in map_lookup.items():
-                if not entry["inserted"]:
-                    for fl in _map_image_flowables(entry["data"]):
-                        story.append(fl)
-                    entry["inserted"] = True
-                    break
+            # Sem marcadores: insere o 1.º mapa pendente antes da tabela (comportamento
+            # antigo). Com marcadores, os mapas já foram colocados no sítio certo.
+            if not has_map_markers:
+                for entry in map_lookup.values():
+                    if not entry["inserted"]:
+                        for fl in _map_image_flowables(entry["data"]):
+                            story.append(fl)
+                        entry["inserted"] = True
+                        break
 
             table_lines = []
             while i < len(lines) and lines[i].strip().startswith("|"):
@@ -330,20 +444,32 @@ def build_pdf(
                 story.append(fl)
             entry["inserted"] = True
 
-    # Gráficos estatísticos
+    # Gráficos estatísticos (cada um pode ser bytes ou {'caption','png'})
     if charts:
         story.append(Spacer(1, 0.4 * cm))
         story.append(Paragraph("Análise Estatística", styles["h2"]))
         story.append(HRFlowable(width="100%", thickness=1.2, color=GREEN_MID, spaceAfter=6))
-        for chart_png in charts:
-            img = Image(io.BytesIO(chart_png), width=14 * cm, height=7.5 * cm)
+        for chart in charts:
+            caption = chart.get("caption") if isinstance(chart, dict) else None
+            analysis = chart.get("analysis") if isinstance(chart, dict) else None
+            png = chart["png"] if isinstance(chart, dict) else chart
+            img = Image(io.BytesIO(png), width=14 * cm, height=7.5 * cm)
             img.hAlign = "LEFT"
-            story.append(img)
+            if caption:
+                # título e gráfico nunca se separam entre páginas
+                story.append(KeepTogether([Paragraph(caption, styles["h3"]), img]))
+            else:
+                story.append(img)
+            story.append(Spacer(1, 0.2 * cm))
+            # Análise da IA do gráfico (uma frase ou duas) logo a seguir.
+            if analysis:
+                story.append(Paragraph(_fmt(analysis), styles["body"]))
             story.append(Spacer(1, 0.4 * cm))
 
     def _page_cb(canvas, doc):
         _on_page(canvas, doc, level, date_str)
 
-    doc.build(story, onFirstPage=_page_cb, onLaterPages=_page_cb)
+    # multiBuild: necessário para resolver os números de página do Índice.
+    doc.multiBuild(story, onFirstPage=_page_cb, onLaterPages=_page_cb)
     buf.seek(0)
     return buf.read()

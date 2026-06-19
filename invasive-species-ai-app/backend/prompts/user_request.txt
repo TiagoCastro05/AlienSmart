@@ -12,4 +12,7 @@ INSTRUÇÕES CRÍTICAS:
 - Se o JSON contém "species_data": analisa CADA espécie listada usando os seus valores exatos de área_adequada_km2 e tendencia_futura.
 - Se o JSON contém "visao_geral_sdm": escreve uma análise geral das principais espécies invasoras com base nas top_especies listadas.
 - Substitui SEMPRE os placeholders da estrutura (como [Nome], [Área], [%]) pelos valores reais dos dados acima.
+- ÂMBITO (MUITO IMPORTANTE): os valores e variações de "area_adequada_nacional_km2" e "tendencia_futura" são À ESCALA NACIONAL. Ao usá-los, escreve SEMPRE explicitamente "a nível nacional" ou "em Portugal continental". Podes citar estes números (km² e %) no Resumo, Resultados e Discussão.
+- NÚMEROS DO CONCELHO: NÃO escrevas valores numéricos (km² nem %) referentes ao concelho/município no texto corrido (Resumo, Discussão, Conclusão). Esses valores exatos do concelho são apresentados automaticamente numa secção própria ("Análise no Município", com tabela e mapas). No texto, refere o concelho apenas de forma QUALITATIVA (ex.: "à escala do concelho de Guarda, a espécie encontra condições favoráveis/limitadas, conforme detalhado na secção de análise municipal"). NUNCA apliques uma percentagem ou área nacional ao concelho.
+- COERÊNCIA: a tendência futura que descreveres tem de ser coerente com "tendencia_futura" (ex.: se a variação é negativa, NÃO escrevas que a espécie está em aumento/expansão).
 - Escreve em português europeu.

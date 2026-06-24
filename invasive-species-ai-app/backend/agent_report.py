@@ -375,7 +375,15 @@ def _get_model() -> ChatOllama:
     global _model_instance
     if _model_instance is None:
         logger.info("A inicializar modelo LLM (Ollama llama3.1:8b)…")
-        _model_instance = ChatOllama(model="llama3.1:8b", temperature=0)
+        # num_ctx alargado: o relatório injeta um extra_data_json grande; com o
+        # default (2048) sobrava pouco contexto para o output e o texto saía curto.
+        # num_predict alto permite relatórios longos e desenvolvidos (ex.: técnico).
+        _model_instance = ChatOllama(
+            model="llama3.1:8b",
+            temperature=0.2,
+            num_ctx=8192,
+            num_predict=4096,
+        )
     return _model_instance
 
 
@@ -388,7 +396,9 @@ def analyze_chart_with_ai(title: str, data_text: str) -> str:
         return ""
     prompt = (
         "És um analista técnico de espécies invasoras. Escreve uma análise MUITO CURTA "
-        "(2 a 3 frases, em português europeu) do gráfico descrito abaixo, baseada "
+        "(2 a 3 frases, em português europeu de Portugal — NUNCA do Brasil; ex.: "
+        "'monitorizar' e não 'monitorar', 'está a aumentar' e não 'está aumentando') "
+        "do gráfico descrito abaixo, baseada "
         "EXCLUSIVAMENTE nos dados fornecidos. Não inventes números nem cites valores "
         "que não estejam nos dados. Não repitas o título nem uses marcadores/listas. "
         "Destaca a tendência ou o contraste mais relevante.\n\n"
@@ -402,6 +412,30 @@ def analyze_chart_with_ai(title: str, data_text: str) -> str:
     except Exception as exc:
         logger.warning("[analyze_chart_with_ai] falhou para %r: %s", title, exc)
         return ""
+
+
+# Campos de percentagem/contagem que o LLM tende a citar incorretamente.
+# Ex.: `suitable_pct` é relativo à extensão do raster europeu, não a Portugal —
+# o modelo escrevia "73,65% da superfície nacional", o que está errado e
+# contradiz as tabelas. As percentagens CORRETAS vêm das tabelas determinísticas
+# (report_tables.py); por isso removemo-las dos dados enviados ao LLM e deixamos
+# apenas os valores em km².
+_PCT_KEYS_TO_STRIP = {
+    "suitable_pct",
+    "n_suitable_pixels",
+    "hist_to_2041_2070_pct",
+    "hist_to_2071_2100_pct",
+    "percentagem_do_municipio_ocupada",
+}
+
+
+def _strip_pct(obj):
+    """Remove recursivamente os campos de percentagem que o LLM cita mal."""
+    if isinstance(obj, dict):
+        return {k: _strip_pct(v) for k, v in obj.items() if k not in _PCT_KEYS_TO_STRIP}
+    if isinstance(obj, list):
+        return [_strip_pct(v) for v in obj]
+    return obj
 
 
 def generate_agent_report(
@@ -452,17 +486,19 @@ def generate_agent_report(
                     "area_adequada_km2": area,
                     "tendencia_futura": trend,
                 }
-            extra_data["species_data"].append(entry)
+            # Remove as percentagens que o LLM cita mal — só km² no texto;
+            # as % corretas vêm das tabelas determinísticas.
+            extra_data["species_data"].append(_strip_pct(entry))
 
     else:
         # Sem espécies selecionadas → visão geral das top invasoras por SDM
         try:
             top_hist = json.loads(get_raster_top_species_tool.invoke({"top_n": 8, "period": "hist"}))
             top_fut  = json.loads(get_raster_top_species_tool.invoke({"top_n": 8, "period": "2041-2070"}))
-            extra_data["visao_geral_sdm"] = {
+            extra_data["visao_geral_sdm"] = _strip_pct({
                 "top_especies_historico": top_hist,
                 "top_especies_futuro_2041_2070_ssp370": top_fut,
-            }
+            })
         except Exception:
             extra_data["visao_geral_sdm"] = {"nota": "Dados SDM não disponíveis de momento."}
 

@@ -1,28 +1,62 @@
-RELATÓRIO PARA PÚBLICO GERAL (3-5 páginas)
+RELATÓRIO PARA O PÚBLICO GERAL (3-5 páginas)
 
-Audiência: Público geral sem conhecimentos técnicos sobre espécies invasoras.
+Audiência: Público geral, sem conhecimentos técnicos sobre espécies invasoras.
 
 Características obrigatórias:
-- Linguagem muito simples, acessível e amigável
-- Sem jargão técnico ou científico
-- Explica conceitos básicos como "espécie invasora" e "modelo de distribuição"
-- Foco em informações práticas e interessantes
-- Tom educativo e não alarmista
+- Linguagem muito simples, acessível e amigável; SEM jargão técnico ou científico.
+- Explica por palavras simples conceitos básicos como "espécie invasora" e "modelo de distribuição".
+- Tom educativo, interessante e NÃO alarmista.
 
-Regras obrigatórias:
-- Não existem "dados de campo" nem "observações pontuais". Fala apenas de "Área adequada", "Modelos Preditivos" ou "Distribuição Estimada".
-- Se te pedirem um relatório sobre um municí
-pio, USA APENAS os dados da ferramenta de recorte (municipality_overlap) para referir áreas e percentagens locais.
-- Não mistures a área total de Portugal com a área do Município.
-- Não inventes origens biológicas para as espécies nem causalidades que não estejam nos números.
-- Escreve em português europeu.
+PORTUGUÊS EUROPEU (pt-PT) — REGRA CRÍTICA, NÃO FALHES:
+- Escreve SEMPRE em português de Portugal. NUNCA uses português do Brasil, mesmo em
+  linguagem simples/amigável.
+- Formas corretas (errado → certo): "em um/em uma" → "num/numa"; "úmido" → "húmido";
+  "planejar" → "planear"; "monitorar" → "monitorizar"; "controle" → "controlo";
+  "conscientização" → "sensibilização"; "registro" → "registo".
+- Colocação pronominal de Portugal: "dá-se bem", "encontra-se", "darão-se bem" → usa
+  "dá-se bem" / "vai dar-se bem", NUNCA "se dá bem" / "se darão bem".
+- Possessivos com artigo: "as suas populações" e não "suas populações".
+- "está a aumentar"/"está a alargar-se" e não "está aumentando".
 
-Estrutura obrigatória:
-1. Título atrativo
-2. Introdução: O que são espécies invasoras
-3. As espécies encontradas: descrição acessível de cada espécie, incluindo área que ocupam em Portugal
-4. Onde estão concentradas: áreas com mais registos de campo
-5. O que nos dizem os modelos: explicação simples do que os SDM indicam para o futuro
-6. O que podemos fazer: dicas práticas
-7. Limitações: explicação clara das limitações dos dados
-8. Conclusão: mensagem positiva
+Regras obrigatórias sobre os dados:
+- Baseia-te APENAS nos Modelos de Distribuição (SDM). NÃO menciones "registos de campo",
+  "observações" nem "dados pontuais".
+- Fala de "zonas onde a espécie se dá bem" ou "áreas adequadas", em linguagem simples.
+  NÃO uses números de km², percentagens, tabelas nem somas/totais.
+- NÃO escrevas o marcador [[TABELAS_SDM]] — este relatório não tem tabelas.
+- NÃO inventes a origem das espécies nem causas que não estejam nos dados.
+
+Mapas (muito importante):
+- Para CADA espécie, escreve numa LINHA ISOLADA o marcador [[MAPA:Nome científico exato]]
+  dentro da secção dessa espécie. O mapa dessa espécie será inserido automaticamente nesse sítio.
+- Usa o nome científico EXATAMENTE como aparece nos dados fornecidos.
+
+Estrutura OBRIGATÓRIA (usa exatamente estes títulos a negrito):
+
+**Título:** [Escreve um título atrativo e acessível]
+
+**O que são espécies invasoras**
+[Explicação simples, 1 a 2 parágrafos: o que são, porque importam, e o que é um modelo
+de distribuição em palavras do dia a dia.]
+
+**As espécies em destaque**
+[Para CADA espécie selecionada, cria um subtítulo com o nome da espécie, seguido de uma
+descrição acessível de onde se dá bem em Portugal, e logo a seguir o marcador do mapa:]
+
+### [Nome da espécie]
+[Descrição simples e interessante desta espécie e das zonas onde se dá bem.]
+[[MAPA:Nome científico exato da espécie]]
+
+**O que os modelos dizem sobre o futuro**
+[Explicação simples, SEM números, de tendências: a espécie pode alargar-se ou recuar com
+as alterações climáticas.]
+
+**O que podemos fazer**
+- [Dica prática 1]
+- [Dica prática 2]
+
+**Limitações**
+[Explicação clara e simples de que são previsões de modelos e podem não ser exatas.]
+
+**Conclusão**
+[Mensagem final positiva e mobilizadora.]

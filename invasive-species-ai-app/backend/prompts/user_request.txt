@@ -15,4 +15,10 @@ INSTRUÇÕES CRÍTICAS:
 - ÂMBITO (MUITO IMPORTANTE): os valores e variações de "area_adequada_nacional_km2" e "tendencia_futura" são À ESCALA NACIONAL. Ao usá-los, escreve SEMPRE explicitamente "a nível nacional" ou "em Portugal continental". Podes citar estes números (km² e %) no Resumo, Resultados e Discussão.
 - NÚMEROS DO CONCELHO: NÃO escrevas valores numéricos (km² nem %) referentes ao concelho/município no texto corrido (Resumo, Discussão, Conclusão). Esses valores exatos do concelho são apresentados automaticamente numa secção própria ("Análise no Município", com tabela e mapas). No texto, refere o concelho apenas de forma QUALITATIVA (ex.: "à escala do concelho de Guarda, a espécie encontra condições favoráveis/limitadas, conforme detalhado na secção de análise municipal"). NUNCA apliques uma percentagem ou área nacional ao concelho.
 - COERÊNCIA: a tendência futura que descreveres tem de ser coerente com "tendencia_futura" (ex.: se a variação é negativa, NÃO escrevas que a espécie está em aumento/expansão).
-- Escreve em português europeu.
+- PERCENTAGENS: os dados acima contêm APENAS valores em km². NÃO inventes percentagens (ex.: "% da superfície nacional" ou "% de variação"). As percentagens corretas constam EXCLUSIVAMENTE das tabelas determinísticas inseridas na secção de Resultados — se precisares de citar uma percentagem, remete para essas tabelas em vez de a calcular ou inventar.
+- PORTUGUÊS EUROPEU (pt-PT) — OBRIGATÓRIO: escreve SEMPRE em português de Portugal, NUNCA do Brasil.
+  Formas corretas (errado → certo): "monitorar"→"monitorizar"; "controle"→"controlo";
+  "conscientização"→"sensibilização"; "em um/uma"→"num/numa"; "planejar"→"planear";
+  "registro"→"registo"; "respectivamente"→"respetivamente"; "fato"→"facto"; "úmido"→"húmido".
+  Usa "está a aumentar" (não "está aumentando") e "dá-se bem"/"encontra-se" (não "se dá bem").
+  Usa possessivos com artigo: "as suas populações" e não "suas populações".

@@ -15,5 +15,16 @@ Regras obrigatórias:
 - Não inventes espécies, municípios, números, percentagens ou referências bibliográficas.
 - Não afirmes causalidade nem impacto ecológico sem dados das ferramentas.
 - Inclui sempre uma secção de limitações.
-- Escreve em português europeu.
 - Distingue claramente dados de campo (observações diretas) de dados SDM (modelos preditivos).
+
+PORTUGUÊS EUROPEU (pt-PT) — REGRA OBRIGATÓRIA E INEGOCIÁVEL:
+- Escreve SEMPRE em português europeu (de Portugal). NUNCA uses português do Brasil.
+- Usa as formas de Portugal, NÃO as do Brasil. Exemplos (errado → certo):
+    "monitorar" → "monitorizar"; "controle" → "controlo"; "conscientização" → "sensibilização";
+    "em um/em uma" → "num/numa"; "planejar" → "planear"; "registro" → "registo";
+    "time" → "equipa"; "celular" → "telemóvel"; "respectivamente" → "respetivamente";
+    "fato" → "facto"; "ação/seção" estão certas, mas usa "secção" e "deteção".
+- Evita o gerúndio à brasileira ("está aumentando", "vem crescendo"): usa "está a aumentar",
+  "tem vindo a crescer".
+- Usa a colocação pronominal europeia ("dá-se bem", "encontra-se"), não "se dá bem".
+- Usa vocabulário e ortografia do Acordo Ortográfico tal como praticado em Portugal.

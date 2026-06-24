@@ -461,12 +461,135 @@ def build_overlap_section(species_configs: list, municipality: str | None) -> st
     return "\n".join(linhas)
 
 
+def _report_layout(level: str) -> dict:
+    """Define que elementos cada nível de relatório inclui.
+
+    Decisões acordadas com o utilizador:
+      • técnico  — relatório completo (comportamento original): tabelas SDM,
+        secções e mapas de município, sobreposição, mapas por espécie + combinado,
+        gráficos de campo e de evolução SDM.
+      • público  — leve: apenas um mapa por espécie e texto simples. SEM tabelas,
+        SEM secção/mapas de município, SEM sobreposição ("soma"), SEM gráficos.
+      • executivo — orientado a decisão: tabelas SDM + UM único mapa-resumo
+        (sobreposição de todas as espécies, ou o mapa da única espécie) +
+        gráficos de evolução SDM. SEM mapas por espécie nem secções de município.
+    """
+    if level == "publico":
+        return {
+            "sdm_tables":        False,
+            "municipio_section": False,
+            "overlap_section":   False,
+            "per_species_maps":  True,
+            "combined_map":      False,
+            "municipio_maps":    False,
+            "field_charts":      False,
+            "sdm_charts":        False,
+        }
+    if level == "executivo":
+        return {
+            "sdm_tables":        True,
+            "municipio_section": False,
+            "overlap_section":   False,
+            "per_species_maps":  False,   # só o mapa-resumo (ver _build_overview_map)
+            "combined_map":      True,
+            "municipio_maps":    False,
+            "field_charts":      False,
+            "sdm_charts":        True,
+        }
+    # técnico (predefinição) — relatório completo, comportamento original
+    return {
+        "sdm_tables":        True,
+        "municipio_section": True,
+        "overlap_section":   True,
+        "per_species_maps":  True,
+        "combined_map":      True,
+        "municipio_maps":    True,
+        "field_charts":      True,
+        "sdm_charts":        True,
+    }
+
+
+_PROSE_PCT_RE = re.compile(r'[-+−]?\d{1,3}(?:[.,]\d+)?\s*%')
+
+
+def _strip_prose_percentages(text: str) -> str:
+    """Substitui percentagens numéricas no texto do LLM por "(ver tabela)".
+
+    O modelo local fabrica percentagens (variações, "% nacional") que contradizem
+    as tabelas determinísticas. Como esta função corre ANTES da injeção dessas
+    tabelas/secções, só afeta a prosa do LLM — os valores corretos das tabelas
+    ficam intactos.
+    """
+    out = _PROSE_PCT_RE.sub("(ver tabela)", text)
+    # Junta sequências ("de (ver tabela) e (ver tabela)") numa só referência.
+    out = re.sub(r'\(ver tabela\)(?:\s*(?:e|,|;)\s*\(ver tabela\))+', "(ver tabelas)", out)
+    # Remove "respetivamente"/"respectivamente" que fica órfão sem os números.
+    out = re.sub(r',?\s*\brespe[ct]+ivamente\b', "", out, flags=re.IGNORECASE)
+    # Evita parêntese duplicado quando a % já estava entre parênteses.
+    out = out.replace("((ver tabela)", "(ver tabela")
+    out = re.sub(r'[ \t]{2,}', " ", out)
+    return out
+
+
+# Substituições pt-BR → pt-PT seguras e inequívocas. NÃO incluímos correções de
+# colocação de clíticos ambíguas (ex.: "que se dá" está correto em pt-PT), só os
+# casos lexicais claros e o padrão auxiliar+"se"+infinitivo (tipicamente do Brasil).
+_PT_FIXES = [
+    (r'\bem um\b',                'num'),
+    (r'\bem uma\b',               'numa'),
+    (r'\búmid',                   'húmid'),       # úmido/úmida/úmidos/úmidas
+    (r'\bmonitorar\b',            'monitorizar'),
+    (r'\bmonitoramento\b',        'monitorização'),
+    (r'\bplaneja(r|mento)\b',     lambda m: 'planear' if m.group(1) == 'r' else 'planeamento'),
+    (r'\bregistros?\b',           lambda m: m.group(0).replace('registr', 'regist')),
+    (r'\brespectivamente\b',      'respetivamente'),
+    (r'\bconscientização\b',      'sensibilização'),
+    (r'\bconscientizar\b',        'sensibilizar'),
+    (r'\bmudanças climáticas\b',  'alterações climáticas'),
+    (r'\bmudança climática\b',    'alteração climática'),
+    (r'\bleva em conta\b',        'tem em conta'),
+    (r'\blevar em conta\b',       'ter em conta'),
+    (r'\bmedidas de controle\b',  'medidas de controlo'),
+    # auxiliar + "se" + infinitivo → ênclise no infinitivo (PT)
+    (r'\b(pode|podem|deve|devem|vai|vão|tende|tendem|começa|começam) se (\w+r)\b',
+     r'\1 \2-se'),
+    # pronome-sujeito explícito + "se" + verbo finito → ênclise (PT exige ênclise
+    # aqui; não há gatilho de próclise). Ex.: "Ela se dá" → "Ela dá-se".
+    (r'\b(Ela|Ele|Elas|Eles) se (\w+)\b', r'\1 \2-se'),
+]
+
+
+def _normalize_pt_pt(text: str) -> str:
+    """Corrige, de forma determinística, marcadores frequentes de pt-BR para pt-PT.
+
+    O modelo local (llama3.1:8b) escorrega para português do Brasil mesmo com a
+    instrução nos prompts; estas substituições garantem o resultado. Preserva a
+    maiúscula inicial quando a palavra começa frase.
+    """
+    def _preserve_case(repl):
+        def _f(m):
+            out = repl(m) if callable(repl) else repl
+            if m.group(0)[:1].isupper():
+                out = out[:1].upper() + out[1:]
+            return out
+        return _f
+
+    for pattern, repl in _PT_FIXES:
+        # As regras com backreferences (\1) não precisam de preservar maiúscula.
+        if isinstance(repl, str) and '\\' in repl:
+            text = re.sub(pattern, repl, text, flags=re.IGNORECASE)
+        else:
+            text = re.sub(pattern, _preserve_case(repl), text, flags=re.IGNORECASE)
+    return text
+
+
 def build_report_payload(
     level: str,
     species: str = None,
     municipality: str = None,
     species_configs: list = None,
 ) -> dict:
+    layout = _report_layout(level)
     summary = get_summary(municipality=municipality)
     try:
         report = generate_agent_report(
@@ -483,10 +606,22 @@ def build_report_payload(
         report = f"{report}\nMotivo tecnico: {str(error)}".strip()
         source = "template_fallback"
 
+    # O LLM (llama3.1:8b) tende a CALCULAR/INVENTAR percentagens no texto que não
+    # batem certo com os dados (ex.: variações ou "% nacional" erradas). As únicas
+    # percentagens fiáveis vêm das tabelas/secções determinísticas, inseridas a
+    # seguir. Por isso removemos as percentagens do texto escrito pelo LLM ANTES
+    # dessa injeção — assim limpamos só a prosa do modelo e preservamos as tabelas.
+    report = _strip_prose_percentages(report)
+
+    # Normaliza pt-BR → pt-PT no texto do LLM (as secções determinísticas que se
+    # seguem já estão em pt-PT). Garante português europeu mesmo quando o modelo
+    # escorrega para formas brasileiras.
+    report = _normalize_pt_pt(report)
+
     # Substitui o marcador [[TABELAS_SDM]] pelas tabelas de área adequada
     # calculadas em Python (valores exatos). Se o LLM não tiver escrito o
     # marcador, acrescenta as tabelas no fim. Sem dados → remove o marcador.
-    results_section = build_results_section(species_configs or [])
+    results_section = build_results_section(species_configs or []) if layout["sdm_tables"] else ""
     if "[[TABELAS_SDM]]" in report:
         report = report.replace("[[TABELAS_SDM]]", results_section or "")
     elif results_section:
@@ -496,13 +631,15 @@ def build_report_payload(
     # Posição: LOGO APÓS os Resultados, antes da Discussão — para manter o fluxo
     # nacional → concelho → discussão. Se não houver Discussão, vai para o fim.
     extra_blocks = []
-    municipio_section = build_municipio_area_section(species_configs or [], municipality)
-    if municipio_section:
-        extra_blocks.append(municipio_section)
+    if layout["municipio_section"]:
+        municipio_section = build_municipio_area_section(species_configs or [], municipality)
+        if municipio_section:
+            extra_blocks.append(municipio_section)
     # Secção dedicada às zonas de sobreposição (mapa combinado nacional + concelho).
-    overlap_section = build_overlap_section(species_configs or [], municipality)
-    if overlap_section:
-        extra_blocks.append(overlap_section)
+    if layout["overlap_section"]:
+        overlap_section = build_overlap_section(species_configs or [], municipality)
+        if overlap_section:
+            extra_blocks.append(overlap_section)
     if extra_blocks:
         block = "\n\n".join(extra_blocks)
         m = re.search(r'(?im)^\s*(?:#+\s*)?\*{0,2}\s*Discuss[aã]o', report)
@@ -860,7 +997,7 @@ def build_sdm_evolution_charts(species_configs: list) -> list[dict]:
 
 
 
-def _build_species_maps(configs: list) -> list[dict]:
+def _build_species_maps(configs: list, include_combined: bool = True) -> list[dict]:
     maps = []
     for cfg in configs:
         sp            = cfg["species"]
@@ -875,7 +1012,7 @@ def _build_species_maps(configs: list) -> list[dict]:
         else:
             logger.warning("[PDF maps] Mapa devolveu None para %r / %r / %r", sp, period, scenario)
 
-    if len(configs) >= 2:
+    if include_combined and len(configs) >= 2:
         combined_png = build_combined_map_image(configs)
         if combined_png:
             maps.append({
@@ -890,6 +1027,58 @@ def _build_species_maps(configs: list) -> list[dict]:
 
     logger.info("[PDF maps] Total mapas gerados: %d", len(maps))
     return maps
+
+
+def _build_overview_map(configs: list) -> list[dict]:
+    """Um único mapa-resumo para o relatório executivo.
+
+    Com 2+ espécies → mapa de sobreposição (todas as espécies juntas).
+    Com 1 espécie   → o mapa nacional dessa espécie.
+    """
+    if not configs:
+        return []
+    if len(configs) >= 2:
+        png = build_combined_map_image(configs)
+        if png:
+            return [{
+                "species": "__combined__",
+                "period": "hist",
+                "scenario": None,
+                "map_png": png,
+                "title": "Mapa-resumo — Zonas de maior pressão invasora (sobreposição de espécies)",
+            }]
+        logger.warning("[PDF maps] Mapa-resumo combinado devolveu None")
+        return []
+    cfg = configs[0]
+    sp = cfg["species"]
+    period = cfg.get("period", "hist")
+    scenario = cfg.get("scenario") if period != "hist" else None
+    png = build_raster_map_image(sp, period, scenario, colormap_name=cfg.get("colormap", "Greens5"))
+    if png:
+        return [{"species": sp, "match_species": sp, "period": period,
+                 "scenario": scenario, "map_png": png}]
+    logger.warning("[PDF maps] Mapa-resumo (1 espécie) devolveu None para %r", sp)
+    return []
+
+
+def _build_report_visuals(level: str, configs: list, municipality: str,
+                          summary: dict) -> tuple[list[dict], list[dict]]:
+    """Constrói (species_maps, charts) de acordo com o layout do nível do relatório."""
+    layout = _report_layout(level)
+    species_maps: list[dict] = []
+    if layout["per_species_maps"]:
+        species_maps += _build_species_maps(configs, include_combined=layout["combined_map"])
+    elif layout["combined_map"]:
+        species_maps += _build_overview_map(configs)
+    if layout["municipio_maps"]:
+        species_maps += _build_municipio_maps(configs, municipality)
+
+    charts: list[dict] = []
+    if layout["field_charts"]:
+        charts += build_charts(summary)
+    if layout["sdm_charts"]:
+        charts += build_sdm_evolution_charts(configs)
+    return species_maps, charts
 
 
 def _build_municipio_maps(configs: list, municipality: str) -> list[dict]:
@@ -986,9 +1175,9 @@ def export_report_pdf(
     configs = [{"species": species, "period": period, "scenario": scenario, "binary": True}] if species else []
     payload = build_report_payload(normalized_level, species=species, municipality=municipality, species_configs=configs)
     filters = {"species": [species] if species else [], "municipality": municipality}
-    species_maps = _build_species_maps(configs)
-    species_maps += _build_municipio_maps(configs, municipality)
-    charts = build_charts(payload["summary"]) + build_sdm_evolution_charts(configs)
+    species_maps, charts = _build_report_visuals(
+        normalized_level, configs, municipality, payload["summary"]
+    )
     pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps, charts=charts)
     filename = f"relatorio_{normalized_level}.pdf"
     return Response(
@@ -1009,9 +1198,9 @@ def export_report_pdf_post(
     species = configs[0]["species"] if len(configs) == 1 else None
     payload = build_report_payload(normalized_level, species=species, municipality=municipality, species_configs=configs)
     filters = {"species": [c["species"] for c in configs], "municipality": municipality}
-    species_maps = _build_species_maps(configs)
-    species_maps += _build_municipio_maps(configs, municipality)
-    charts = build_charts(payload["summary"]) + build_sdm_evolution_charts(configs)
+    species_maps, charts = _build_report_visuals(
+        normalized_level, configs, municipality, payload["summary"]
+    )
     pdf_bytes = build_pdf(payload["report"], normalized_level, filters=filters, species_maps=species_maps, charts=charts)
     filename = f"relatorio_{normalized_level}.pdf"
     return Response(

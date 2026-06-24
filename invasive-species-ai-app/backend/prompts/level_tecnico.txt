@@ -1,24 +1,47 @@
-RELATÓRIO TÉCNICO
+RELATÓRIO TÉCNICO (extenso e aprofundado — 8 a 12 páginas)
 
-Audiência: Especialistas, biólogos, ecologistas, gestores ambientais.
+Audiência: Especialistas, biólogos, ecologistas e gestores ambientais.
 
 Características obrigatórias:
-- Linguagem técnica e científica.
+- Linguagem técnica e científica, rigorosa e bem fundamentada.
 - Baseia-te EXCLUSIVAMENTE nos dados dos Modelos SDM (ignora registos de campo).
-- Usa OBRIGATORIAMENTE o formato de tabelas Markdown fornecido abaixo para a secção de Resultados.
+- Desenvolve CADA secção em profundidade. NÃO sejas telegráfico: escreve parágrafos
+  completos e bem articulados, com raciocínio explícito sobre os dados.
+- Usa OBRIGATORIAMENTE o marcador [[TABELAS_SDM]] na secção de Resultados.
+- Escreve em português europeu.
 
-Estrutura OBRIGATÓRIA (Usa exatamente estes títulos e formatos):
+EXIGÊNCIAS DE PROFUNDIDADE (muito importante):
+- Resumo Executivo: 1 a 2 parágrafos densos (>= 8 linhas no total).
+- Introdução: 2 a 3 parágrafos.
+- Metodologia: 2 a 3 parágrafos.
+- Discussão: pelo menos 4 parágrafos, organizados nos sub-tópicos indicados abaixo.
+- Recomendações: 5 a 7 recomendações, cada uma com 1-2 frases de justificação.
+- Conclusão: 1 a 2 parágrafos.
+- Sempre que cites números, contextualiza-os (compara períodos, cenários e espécies),
+  em vez de apenas os listar.
 
-**Título:** [Escreve um título adequado]
+Estrutura OBRIGATÓRIA (usa exatamente estes títulos e formatos):
+
+**Título:** [Escreve um título técnico, específico e informativo]
 
 **Resumo Executivo:**
-[Texto do resumo]
+[Síntese técnica densa: espécies analisadas, magnitude da área adequada a nível nacional,
+tendência dominante entre o histórico e os cenários futuros (SSP1-2.6/SSP3-7.0/SSP5-8.5),
+e as principais implicações para a gestão. Antecipa os achados mais importantes.]
 
 **Introdução: Contexto Ecológico**
-[Texto da introdução]
+[Enquadra o problema das espécies invasoras e o papel dos modelos de distribuição (SDM)
+na antecipação de áreas climaticamente adequadas. Apresenta as espécies em estudo e a
+relevância de avaliar a sua dinâmica sob cenários de alterações climáticas. Define o
+objetivo do relatório.]
 
 **Metodologia: Descrição dos Modelos SDM Utilizados**
-[Texto da metodologia]
+[Descreve a abordagem SDM: estimativa da área climaticamente adequada (km²) a partir de
+rasters binários; os três períodos analisados (Histórico 1981-2024, 2041-2070 e 2071-2100);
+e os três cenários socioeconómicos (SSP1-2.6 otimista, SSP3-7.0 intermédio, SSP5-8.5
+pessimista). Explica como se calcula a variação percentual e a classificação de tendência
+(declínio/estável/expansão). Refere que os valores apresentados são deterministicamente
+extraídos dos rasters.]
 
 **Resultados**
 
@@ -27,19 +50,37 @@ Estrutura OBRIGATÓRIA (Usa exatamente estes títulos e formatos):
 IMPORTANTE: NÃO escrevas tabelas nem inventes números nesta secção de Resultados.
 Escreve apenas, sozinho numa linha, o marcador [[TABELAS_SDM]] — ele será
 substituído automaticamente pelas tabelas de área adequada (km²) calculadas
-diretamente a partir dos modelos SDM, já com análise crítica. Podes referir-te
-aos valores dessas tabelas na Discussão.
+diretamente a partir dos modelos SDM, já com análise crítica. Podes (e deves)
+referir-te aos valores dessas tabelas na Discussão.
 
-**Discussão: Implicações, Áreas de Risco, Dinâmica de Colonização**
-[Texto da discussão]
+**Discussão: Implicações, Áreas de Risco e Dinâmica de Colonização**
+[Desenvolve em vários parágrafos, cobrindo OBRIGATORIAMENTE estes sub-tópicos, podendo
+usar subtítulos com ### :]
+### Interpretação das tendências por espécie
+[Analisa, espécie a espécie, a evolução da área adequada entre períodos e entre cenários,
+identificando quais expandem, contraem ou se mantêm estáveis e em que medida.]
+### Comparação entre cenários climáticos
+[Compara o efeito dos cenários SSP1-2.6, SSP3-7.0 e SSP5-8.5 e discute o que isso implica
+quanto à sensibilidade das espécies ao forçamento climático.]
+### Áreas de risco e dinâmica de colonização
+[Discute, a nível nacional, onde tende a concentrar-se a pressão invasora e a dinâmica
+esperada de colonização/retração. Refere o concelho apenas de forma qualitativa.]
+### Implicações para a gestão
+[Liga os resultados a prioridades de monitorização, contenção e erradicação.]
 
 **Recomendações Técnicas**
-- [Recomendação 1]
-- [Recomendação 2]
+- [Recomendação 1 + justificação]
+- [Recomendação 2 + justificação]
+- [Recomendação 3 + justificação]
+- [Recomendação 4 + justificação]
+- [Recomendação 5 + justificação]
 
 **Limitações**
-- Os dados utilizados são baseados em modelos SDM, que podem ter limitações em termos de precisão.
-- [Outra limitação baseada no contexto]
+- Os dados utilizados baseiam-se em modelos SDM, que têm incerteza e limitações de precisão.
+- Os modelos refletem adequação climática e não a presença efetiva nem fatores bióticos
+  (competição, dispersão, gestão).
+- [Outra limitação fundamentada no contexto dos dados]
 
 **Conclusão**
-[Texto da conclusão]
+[Síntese final que integra os principais achados, a tendência dominante e as prioridades
+de atuação, sem introduzir números novos que não constem das tabelas.]

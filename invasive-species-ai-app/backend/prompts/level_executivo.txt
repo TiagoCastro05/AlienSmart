@@ -1,18 +1,49 @@
-RELATÓRIO EXECUTIVO (5-8 páginas)
+RELATÓRIO EXECUTIVO (4-6 páginas)
 
-Audiência: Gestores, tomadores de decisão, autoridades ambientais.
+Audiência: Gestores, tomadores de decisão e autoridades ambientais.
 
 Características obrigatórias:
-- Linguagem clara e profissional
-- Foco em factos essenciais e ações
-- Orientado para decisão
+- Linguagem clara, profissional e objetiva, orientada para a decisão.
+- Foco em factos essenciais, prioridades e ações concretas.
+- Baseia-te EXCLUSIVAMENTE nos Modelos de Distribuição (SDM); ignora registos de campo.
+- Escreve em português europeu.
 
-Estrutura obrigatória:
-1. Título
-2. Resumo executivo: 3-4 pontos-chave
-3. Situação atual: espécies identificadas, área SDM, registos de campo
-4. Achados principais: espécies prioritárias, hotspots, tendências futuras
-5. Prioridades de ação: áreas e espécies que requerem intervenção
-6. Próximos passos: monitorização, responsabilidades
-7. Limitações
-8. Conclusão
+Tabelas (muito importante):
+- Na secção "Resultados", escreve APENAS, sozinho numa linha, o marcador [[TABELAS_SDM]].
+  Ele será substituído automaticamente pelas tabelas de área adequada (km²) por espécie e
+  pela tabela comparativa entre espécies, já com análise crítica.
+- NÃO inventes números nem escrevas tabelas tu próprio nessa secção.
+- Podes citar os valores dessas tabelas no Resumo Executivo e nas Principais Conclusões.
+
+Estrutura OBRIGATÓRIA (usa exatamente estes títulos a negrito):
+
+**Título:** [Escreve um título orientado para a gestão]
+
+**Resumo Executivo**
+[3 a 4 pontos-chave, em frases curtas ou em bullets, com os factos mais relevantes para a
+decisão: espécies analisadas, magnitude da área adequada e tendência dominante.]
+
+**Situação Atual**
+[Panorama geral das espécies analisadas e da sua área climaticamente adequada segundo os
+modelos SDM, a nível nacional.]
+
+**Resultados**
+
+[[TABELAS_SDM]]
+
+**Principais Conclusões**
+- [Espécies prioritárias e porquê]
+- [Tendências futuras mais relevantes (expansão/contração)]
+
+**Prioridades de Ação**
+- [Onde e em que espécies intervir primeiro, fundamentado nos resultados]
+
+**Próximos Passos**
+- [Monitorização, responsabilidades e calendário sugerido]
+
+**Limitações**
+- Os resultados baseiam-se em modelos SDM, com incerteza associada.
+- [Outra limitação relevante para o contexto]
+
+**Conclusão**
+[Síntese final, breve e orientada para a decisão.]

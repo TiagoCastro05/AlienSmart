@@ -191,16 +191,7 @@ Para alternar entre **Modo Local** e **Modo Online**:
 
 ---
 
-## 📞 Suporte & Contribuições
+## 🤝 Agradecimentos e Créditos
+**Co-Desenvolvimento:** Este protótipo foi programado e desenvolvido em parceria por Tiago Castro e Tomás Amorim.
 
-Para dúvidas, reportar bugs ou sugerir melhorias, por favor abra uma **Issue** neste repositório.
-
----
-
-**Desenvolvido com ❤️ para o Projeto AlienSMART**
-
-O ficheiro backend/requirements.txt encontra-se unificado e já inclui os pacotes de ambos os ecossistemas, eliminando a necessidade de reinstalação:
-
-langchain-ollama (Suporte Local)
-
-langchain-openai (Suporte Cloud/API)
+**Orientação e Dados:** Um agradecimento aos nossos professores Pedro Castro, Pedro Moreira e Alexandre Silve por orientarem o projeto e pelo fornecimento dos dados geográficos (ficheiros raster) que tornaram a análise espacial possível.

@@ -1,3 +1,10 @@
+> ⚠️ **AVISO IMPORTANTE:** A versão final e completa deste projeto (incluindo o processamento de rasters) encontra-se no branch `Rasters`. 
+> 👉 **[Clica aqui para aceder ao código final (Branch Rasters)](https://github.com/TiagoCastro05/AlienSmart/tree/Rasters)** 👈
+
+---
+
+
+
 # 🌍 AlienSMART - Protótipo WebGIS e IA Agentic
 
 > **Inteligência Artificial ao Serviço da Biodiversidade** 🤖🌿
